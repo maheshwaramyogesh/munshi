@@ -47,6 +47,8 @@ class Finding:
     users: List[str]                # distinct usernames targeted
     compromised: bool
     compromised_user: Optional[str]
+    episode_success_users: List[str]  # successful auth during/after the episode (context only)
+    episode_success_lines: List[int]  # line numbers for those contextual successes
     evidence: List[int]             # log line numbers that prove this finding
 
     @property
@@ -91,16 +93,36 @@ def detect(events: List[Event], config: Config = Config()) -> List[Finding]:
             kind = "password_spray" if looks_like_spray else "brute_force"
 
             start, end = ep[0].time, ep[-1].time
-            win = next((s for s in successes
-                        if end <= s.time <= end + config.success_window), None)
+            post_episode_wins = [s for s in successes
+                                 if end <= s.time <= end + config.success_window]
+            win = post_episode_wins[0] if post_episode_wins else None
 
-            evidence = [e.line_no for e in ep] + ([win.line_no] if win else [])
+            # Context: successful authentications that happened during the
+            # suspicious episode or shortly after it. This is intentionally
+            # separate from the scoring signal above: a shared office IP can
+            # have many legitimate successes during the same episode.
+            context_wins = [s for s in successes
+                            if start <= s.time <= end + config.success_window]
+            context_users = sorted({s.user for s in context_wins})
+            context_lines = [s.line_no for s in context_wins]
+
+                        # A single successful user is compatible with the detector's
+            # existing brute-force-success classification. Multiple distinct
+            # successful users from the same source make the interpretation
+            # ambiguous (for example, a shared office IP).
+            authentication_ambiguous = len(context_users) > 1
+            confirmed_success = bool(post_episode_wins) and not authentication_ambiguous
+
+
+            evidence = [e.line_no for e in ep] + [s.line_no for s in post_episode_wins]
             findings.append(Finding(
                 kind=kind, ip=ip, start=start,
                 end=win.time if win else end,
                 failures=len(ep), users=users,
-                compromised=win is not None,
-                compromised_user=win.user if win else None,
+                                compromised=confirmed_success,
+                compromised_user=win.user if confirmed_success else None,
+                episode_success_users=context_users,
+                episode_success_lines=context_lines,
                 evidence=evidence,
             ))
     return sorted(findings, key=lambda f: f.start)

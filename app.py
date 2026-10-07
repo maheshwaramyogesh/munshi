@@ -47,6 +47,9 @@ def finding_to_dict(f, raw_by_line):
         "start": f.start.isoformat(sep=" "), "end": f.end.isoformat(sep=" "),
         "failures": f.failures, "n_users": len(f.users), "users": f.users[:10],
         "compromised": f.compromised, "compromised_user": f.compromised_user,
+        "episode_success_users": f.episode_success_users,
+        "episode_success_count": len(f.episode_success_users),
+        "episode_success_lines": f.episode_success_lines,
         "evidence_total": len(f.evidence),
         "evidence_preview": [{"line": n, "text": raw_by_line.get(n, "")}
                              for n in f.evidence[:EVIDENCE_PREVIEW]],

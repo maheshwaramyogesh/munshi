@@ -21,7 +21,7 @@ function clear(node) { while (node.firstChild) node.removeChild(node.firstChild)
 
 const LABELS = {
   brute_force: "Brute force",
-  brute_force_success: "Brute force, then broke in",
+  brute_force_success: "Brute force + successful authentication observed",
   password_spray: "Password spray",
 };
 
@@ -62,8 +62,16 @@ function renderFindings(findings) {
     tr.appendChild(el("td", String(f.failures)));
     const names = f.users.join(", ") + (f.n_users > f.users.length ? ` ... (${f.n_users} total)` : "");
     tr.appendChild(el("td", names));
-    tr.appendChild(el("td", f.compromised ? `YES (${f.compromised_user})` : "no",
-                      f.compromised ? "yes" : "no"));
+    let authText = "none observed";
+    let authClass = "no";
+    if (f.episode_success_count === 1) {
+      authText = `observed — ${f.episode_success_users[0]}`;
+      authClass = "yes";
+    } else if (f.episode_success_count > 1) {
+      authText = `observed — ${f.episode_success_count} users (ambiguous)`;
+      authClass = "ambiguous";
+    }
+    tr.appendChild(el("td", authText, authClass));
     tr.addEventListener("click", () => showEvidence(f, tr));
     body.appendChild(tr);
   });
