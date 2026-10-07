@@ -10,12 +10,28 @@ Every IP address here is from ranges reserved for documentation (RFC 5737).
 They never belong to real machines. No real data or real people are involved.
 
 HOW TO RUN
-    python generate_logs.py
-It creates two files in a folder called "logs":
-    auth.log          the fake log (what the detector will read)
-    ground_truth.json the answer key (which attacks we planted)
+    python generate_logs.py          EASY data (loud attacks, simple normal users)
+    python generate_logs.py --hard   EASY data + HARD cases (see below)
+
+Easy mode writes into the folder "logs":
+    auth.log, ground_truth.json
+Hard mode writes (the easy files are never touched):
+    auth_hard.log, ground_truth_hard.json, benign_hard.json
+
+HARD CASES (designed from realistic behavior BEFORE looking at any results)
+  Hard innocents (NOT attacks - a good detector should stay quiet):
+    forgotten_password   a real user fails 5-14 times, then gets in
+    shared_office_ip     12 staff behind ONE shared IP all mistype in the morning
+    service_loop         a misconfigured script retrying a wrong password for 3 hours
+  Stealthy attacks (a good detector should catch these):
+    low_and_slow         one try every 20-40 minutes for 40 hours
+    threshold_dodger     short bursts just under the alert threshold (one ends in a break-in)
+    distributed          the same attack spread over 20 different IPs
+NOTE: the stealth attacks model an attacker who knows typical detection settings.
+That is a worst case, and the report should say so.
 """
 
+import argparse
 import json
 import os
 import random
@@ -55,9 +71,11 @@ def make_line(ts, message):
     return (ts, f"{format_time(ts)} {HOSTNAME} sshd[{pid}]: {message}")
 
 
-def failed_login(ts, user, ip):
-    """A failed password attempt. Real logs say 'invalid user' if the account doesn't exist."""
-    who = user if user in LEGIT_USERS else f"invalid user {user}"
+def failed_login(ts, user, ip, valid=None):
+    """A failed password attempt. Real logs say 'invalid user' if the account doesn't exist.
+    'valid' lets us force a real account that isn't in LEGIT_USERS (e.g. a service account)."""
+    is_valid = (user in LEGIT_USERS) if valid is None else valid
+    who = user if is_valid else f"invalid user {user}"
     port = random.randint(1024, 65535)
     return make_line(ts, f"Failed password for {who} from {ip} port {port} ssh2")
 
@@ -150,22 +168,159 @@ def plant_attacks():
     return events, truth
 
 
+def _record(events_out, truth_out, first_id, variant, atype, ips, target, ev):
+    """Add one attack's events to the log and its entry to the answer key."""
+    times = [t for t, _ in ev]
+    truth_out.append({
+        "id": first_id + len(truth_out), "type": atype, "variant": variant,
+        "source_ip": ips[0], "source_ips": ips, "target_user": target,
+        "start": min(times).isoformat(), "end": max(times).isoformat(),
+        "num_log_lines": len(ev),
+    })
+    events_out.extend(ev)
+
+
+def hard_innocents():
+    """Innocent behavior that LOOKS suspicious. Returns (events, list of cases)."""
+    events, cases = [], []
+
+    def add_case(kind, ips, ev):
+        times = [t for t, _ in ev]
+        cases.append({"id": len(cases) + 1, "type": kind, "ips": ips,
+                      "start": min(times).isoformat(), "end": max(times).isoformat(),
+                      "num_log_lines": len(ev)})
+        events.extend(ev)
+
+    # 1) Forgotten password: 5-14 failures in a row, then success, from the usual IP.
+    for user in random.sample(LEGIT_USERS, 6):
+        ip = USER_IP[user]
+        t = START + timedelta(days=random.randint(0, DAYS - 1),
+                              hours=random.randint(8, 16), minutes=random.randint(0, 59))
+        ev = []
+        for _ in range(random.randint(5, 14)):
+            ev.append(failed_login(t, user, ip))
+            t += timedelta(seconds=random.randint(5, 20))
+        ev.append(accepted_login(t, user, ip))
+        add_case("forgotten_password", [ip], ev)
+
+    # 2) Shared office IP: 12 staff behind one address mistype 1-3 times each, then get in.
+    nat_ip = "198.51.100.200"
+    window = START + timedelta(days=random.randint(0, DAYS - 1), hours=9)
+    ev = []
+    for user in random.sample(LEGIT_USERS, 12):
+        t = window + timedelta(seconds=random.randint(0, 1800))
+        for _ in range(random.randint(1, 3)):
+            ev.append(failed_login(t, user, nat_ip))
+            t += timedelta(seconds=random.randint(5, 15))
+        ev.append(accepted_login(t, user, nat_ip))
+    add_case("shared_office_ip", [nat_ip], ev)
+
+    # 3) Service loop: a script with a wrong password retries every minute for 3 hours.
+    ip = "198.51.100.210"
+    t = START + timedelta(days=random.randint(0, DAYS - 1), hours=random.randint(8, 12))
+    ev = [failed_login(t + timedelta(minutes=m), "backup", ip, valid=True) for m in range(180)]
+    add_case("service_loop", [ip], ev)
+
+    return events, cases
+
+
+def hard_attacks(first_id):
+    """Stealthy attacks built to slip past simple per-IP rules. Returns (events, truth)."""
+    events, truth = [], []
+    pool = [f"203.0.113.{i}" for i in range(50, 255)]   # kept apart from the easy attackers
+    random.shuffle(pool)
+
+    def take(n):
+        return [pool.pop() for _ in range(n)]
+
+    def record(variant, atype, ips, target, ev):
+        _record(events, truth, first_id, variant, atype, ips, target, ev)
+
+    # Low and slow: one try every 20-40 minutes for 40 hours (pauses longer than 15 min).
+    for _ in range(2):
+        ip = take(1)[0]
+        start = START + timedelta(seconds=random.randint(0, 3 * 86400))
+        t, ev = start, []
+        while t < start + timedelta(hours=40):
+            ev.append(failed_login(t, "root", ip))
+            t += timedelta(minutes=random.uniform(20, 40))
+        record("low_and_slow", "brute_force", [ip], None, ev)
+
+    # Threshold dodger: 6-8 bursts of 6-9 failures, 20-30 minutes apart.
+    for with_success in (False, True):
+        ip = take(1)[0]
+        target = random.choice(LEGIT_USERS) if with_success else "root"
+        t = START + timedelta(seconds=random.randint(0, 4 * 86400))
+        ev = []
+        for _ in range(random.randint(6, 8)):
+            for ts in random_times(t, random.randint(30, 60), random.randint(6, 9)):
+                ev.append(failed_login(ts, target, ip))
+            t += timedelta(minutes=random.uniform(20, 30))
+        if with_success:
+            last = max(e[0] for e in ev)
+            ev.append(accepted_login(last + timedelta(seconds=random.randint(3, 20)), target, ip))
+        record("threshold_dodger", "brute_force_success" if with_success else "brute_force",
+               [ip], target if with_success else None, ev)
+
+    # Distributed: 20 IPs, each only 3-4 tries, all within about an hour.
+    for _ in range(2):
+        ips = take(20)
+        start = START + timedelta(seconds=random.randint(0, 5 * 86400))
+        ev = []
+        for ip in ips:
+            s0 = start + timedelta(seconds=random.randint(0, 3600))
+            names = random.sample(COMMON_GUESSES + EXTRA_GUESSES, random.randint(3, 4))
+            for ts, name in zip(random_times(s0, random.randint(120, 300), len(names)), names):
+                ev.append(failed_login(ts, name, ip))
+        record("distributed", "password_spray", ips, None, ev)
+
+    return events, truth
+
+
+def write_log(events, path):
+    with open(path, "w") as f:
+        for _, text in sorted(events, key=lambda e: e[0]):
+            f.write(text + "\n")
+
+
 def main():
+    ap = argparse.ArgumentParser(description="Generate fake SSH logs with planted attacks.")
+    ap.add_argument("--hard", action="store_true", help="add hard innocents and stealth attacks")
+    args = ap.parse_args()
+
+    # The easy part runs first and uses the random generator exactly as before,
+    # so the easy data is identical whether or not --hard is used.
     normal = normal_traffic()
     attacks, truth = plant_attacks()
-
-    all_events = sorted(normal + attacks, key=lambda e: e[0])  # sort by time
-
     os.makedirs("logs", exist_ok=True)
-    with open("logs/auth.log", "w") as f:
-        for _, text in all_events:
-            f.write(text + "\n")
-    with open("logs/ground_truth.json", "w") as f:
-        json.dump(truth, f, indent=2)
 
-    print(f"Wrote logs/auth.log          : {len(all_events)} lines "
-          f"({len(normal)} normal, {len(attacks)} attack)")
-    print(f"Wrote logs/ground_truth.json : {len(truth)} planted attacks")
+    if not args.hard:
+        all_events = sorted(normal + attacks, key=lambda e: e[0])
+        write_log(all_events, "logs/auth.log")
+        with open("logs/ground_truth.json", "w") as f:
+            json.dump(truth, f, indent=2)
+        print(f"Wrote logs/auth.log          : {len(all_events)} lines "
+              f"({len(normal)} normal, {len(attacks)} attack)")
+        print(f"Wrote logs/ground_truth.json : {len(truth)} planted attacks")
+        return
+
+    for a in truth:                       # label the original 10 as "loud"
+        a["variant"] = "loud"
+        a["source_ips"] = [a["source_ip"]]
+    inn_events, benign = hard_innocents()
+    atk_events, hard_truth = hard_attacks(first_id=len(truth) + 1)
+    all_truth = truth + hard_truth
+    all_events = normal + attacks + inn_events + atk_events
+
+    write_log(all_events, "logs/auth_hard.log")
+    with open("logs/ground_truth_hard.json", "w") as f:
+        json.dump(all_truth, f, indent=2)
+    with open("logs/benign_hard.json", "w") as f:
+        json.dump(benign, f, indent=2)
+    print(f"Wrote logs/auth_hard.log          : {len(all_events)} lines")
+    print(f"Wrote logs/ground_truth_hard.json : {len(all_truth)} attacks "
+          f"({len(truth)} loud + {len(hard_truth)} stealthy)")
+    print(f"Wrote logs/benign_hard.json       : {len(benign)} hard innocent cases")
 
 
 if __name__ == "__main__":
