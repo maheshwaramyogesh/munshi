@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Munshi</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Munshi</h1>
+    <p>Plain-English incident accounts from SSH logs, where every claim is traced to evidence.</p>
+  </header>
+
+  <section class="controls">
+    <button id="btn-easy">Load easy sample</button>
+    <button id="btn-hard">Load hard sample</button>
+    <label class="upload">Upload a log file
+      <input type="file" id="file-input" accept=".log,.txt">
+    </label>
+  </section>
+
+  <p id="status" role="status"></p>
+
+  <section id="summary" hidden></section>
+
+  <section id="score-section" hidden>
+    <h2>Detector scoreboard (against the answer key)</h2>
+    <div id="score"></div>
+  </section>
+
+  <section id="findings-section" hidden>
+    <h2>Findings</h2>
+    <p class="hint">Click a row to see the log lines that prove it.</p>
+    <table id="findings">
+      <thead>
+        <tr><th>Type</th><th>Source IP</th><th>Start</th><th>Failures</th><th>Usernames</th><th>Got in?</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section id="evidence-section" hidden>
+    <h2>Evidence</h2>
+    <p id="evidence-note" class="hint"></p>
+    <pre id="evidence"></pre>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
