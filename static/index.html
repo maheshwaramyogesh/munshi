@@ -2,50 +2,88 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Munshi</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f1e8">
+  <meta name="description" content="Munshi is an evidence-first SSH authentication log investigation workbench.">
+  <title>Munshi — Security Event Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <h1>Munshi</h1>
-    <p>Plain-English incident accounts from SSH logs, where every claim is traced to evidence.</p>
+<div id="landing" class="landing">
+  <div class="hero-art" aria-hidden="true">
+    <img src="/static/assets/munshi-inkscape.webp" alt="" fetchpriority="high">
+    <div class="sun-aura"></div>
+  </div>
+  <div class="hero-shade" aria-hidden="true"></div>
+
+  <header class="l-top">
+    <a class="brand brand-link" href="#" aria-label="Munshi home">
+      <svg class="seal" viewBox="0 0 40 40" aria-hidden="true"><rect x="2" y="2" width="36" height="36" rx="8"/><path d="M10 29V11h4l6 9 6-9h4v18h-4V18l-6 8-6-8v11Z" fill="currentColor"/></svg>
+      <span>MUNSHI</span><span class="brand-rule" aria-hidden="true"></span>
+    </a>
+    <div class="top-note"><span class="status-dot"></span> Evidence-first security analysis</div>
+    <button id="enter-top" class="btn red">Launch analysis <span aria-hidden="true">↗</span></button>
   </header>
 
-  <section class="controls">
-    <button id="btn-easy">Load easy sample</button>
-    <button id="btn-hard">Load hard sample</button>
-    <label class="upload">Upload a log file
-      <input type="file" id="file-input" accept=".log,.txt">
-    </label>
+  <div class="hero-grid">
+    <main class="l-main">
+      <p class="eyebrow"><span class="eyebrow-line"></span> Security event intelligence</p>
+      <h1>MUNSHI<span class="title-dot">.</span></h1>
+      <p class="tag">From logs to insight.<br><em>From noise to truth.</em></p>
+      <p class="lede">An evidence-first workbench for SSH authentication logs. Find suspicious patterns, follow the timeline, and inspect the exact log lines behind every finding.</p>
+      <div class="cta">
+        <button id="enter" class="btn red btn-primary">Launch analysis <span aria-hidden="true">↗</span></button>
+        <button id="demo" class="btn btn-secondary"><span class="play-icon" aria-hidden="true">▶</span> Explore a sample</button>
+      </div>
+      <div class="trust-note"><span class="trust-mark">✓</span> Deterministic rules <span class="trust-sep">·</span> Inspectable evidence <span class="trust-sep">·</span> No AI guessing</div>
+    </main>
+
+    <aside class="hero-rail" aria-label="Munshi investigation method">
+      <div class="rail-head"><span>THE METHOD</span><span class="rail-count">01 <i>—</i> 06</span></div>
+      <ol class="pipeline">
+        <li><span>01</span> Observe <b>↗</b></li>
+        <li><span>02</span> Interpret <b>↗</b></li>
+        <li><span>03</span> Detect <b>↗</b></li>
+        <li><span>04</span> Investigate <b>↗</b></li>
+        <li><span>05</span> Evaluate <b>↗</b></li>
+        <li><span>06</span> Chronicle <b>↗</b></li>
+      </ol>
+      <p class="rail-foot"><span class="rail-spark">✳</span> Every finding leads back to evidence.</p>
+    </aside>
+  </div>
+
+  <ul class="caps" aria-label="Core capabilities">
+    <li><span class="cap-no">01 / INGEST</span><b>Log analysis</b><span>Parse and normalize SSH authentication events.</span></li>
+    <li><span class="cap-no">02 / DETECT</span><b>Attack patterns</b><span>Identify suspicious behaviour with explicit rules.</span></li>
+    <li><span class="cap-no">03 / INVESTIGATE</span><b>Trace the evidence</b><span>Follow the timeline and inspect raw log lines.</span></li>
+    <li><span class="cap-no">04 / EVALUATE</span><b>Measure performance</b><span>Review planted-attack detection and false alarms.</span></li>
+  </ul>
+  <div class="landing-footer"><span>MUNSHI / SECURITY EVENT INTELLIGENCE</span><span>BUILT FOR CLARITY, NOT NOISE <i>✳</i></span></div>
+</div>
+
+<div id="app" class="app" hidden>
+  <aside class="side">
+    <a class="brand app-brand" href="#" aria-label="Munshi home">
+      <svg class="seal" viewBox="0 0 40 40" aria-hidden="true"><rect x="2" y="2" width="36" height="36" rx="8"/><path d="M10 29V11h4l6 9 6-9h4v18h-4V18l-6 8-6-8v11Z" fill="currentColor"/></svg>
+      <span>MUNSHI</span>
+    </a>
+    <div class="nav-kicker">WORKSPACE <span>01—07</span></div>
+    <nav id="nav" aria-label="Main navigation"></nav>
+    <div class="side-bottom">
+      <div class="side-status"><span class="status-dot"></span><span>REPLAY WORKSPACE</span></div>
+      <p class="mode">Deterministic rules<br>Local log analysis<br>No live feed</p>
+      <div class="side-signoff">MUNSHI <span>·</span> EVIDENCE OVER ASSUMPTION</div>
+    </div>
+  </aside>
+  <section class="main">
+    <header class="top"><div class="top-left"><span class="top-kicker">SECURITY EVENT INTELLIGENCE</span><span class="top-slash">/</span><span id="crumb"></span></div><span id="dataset" class="pill"></span></header>
+    <div id="view" class="view"></div>
+    <footer class="app-footer"><span>MUNSHI / LOCAL ANALYSIS WORKSPACE</span><span>RULE-BASED · EVIDENCE-LINKED</span></footer>
   </section>
-
-  <p id="status" role="status"></p>
-
-  <section id="summary" hidden></section>
-
-  <section id="score-section" hidden>
-    <h2>Detector scoreboard (against the answer key)</h2>
-    <div id="score"></div>
-  </section>
-
-  <section id="findings-section" hidden>
-    <h2>Findings</h2>
-    <p class="hint">Click a row to see the log lines that prove it.</p>
-    <table id="findings">
-      <thead>
-        <tr><th>Type</th><th>Source IP</th><th>Start</th><th>Failures</th><th>Usernames</th><th>Authentication observed</th></tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </section>
-
-  <section id="evidence-section" hidden>
-    <h2>Evidence</h2>
-    <p id="evidence-note" class="hint"></p>
-    <pre id="evidence"></pre>
-  </section>
-
-  <script src="/static/app.js"></script>
+</div>
+<script src="/static/app.js"></script>
 </body>
 </html>
