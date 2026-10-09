@@ -214,3 +214,176 @@ dl.f{display:grid;grid-template-columns:110px 1fr;gap:7px 10px;margin:0;font-siz
 
 /* Clean-wave art direction: decorative dot rows/particle texture are intentionally removed. */
 .layer .dots{display:none!important}
+
+/* =========================================================
+   EVIDENCE-LINKED NARRATIVE
+   Premium presentation for verified claims and source links
+   ========================================================= */
+
+.narrative-panel {
+  position: relative;
+  overflow: hidden;
+  padding: 22px;
+  background:
+    linear-gradient(125deg, rgba(61, 91, 153, 0.09), transparent 48%),
+    var(--surf);
+  border-color: #303951;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.narrative-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    var(--blue),
+    var(--vio) 58%,
+    transparent
+  );
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.narrative-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.narrative-head > div {
+  min-width: 0;
+}
+
+.narrative-panel .narrative-head h3 {
+  margin: 0 0 5px;
+  color: var(--tx);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.narrative-head .sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.narrative-head .pill {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.narrative-summary {
+  margin: 0 0 12px;
+  padding: 15px 17px;
+  color: var(--tx);
+  background: rgba(105, 183, 255, 0.055);
+  border: 1px solid rgba(105, 183, 255, 0.17);
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+  max-width: 82ch;
+}
+
+.narrative-claim {
+  padding: 15px 0;
+  border-top: 1px solid var(--line);
+}
+
+.narrative-claim-title {
+  margin-bottom: 7px;
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.narrative-claim p {
+  margin: 0;
+  max-width: 82ch;
+  color: var(--tx);
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.narrative-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.narrative-links .app-btn {
+  padding: 5px 10px;
+  color: #cbdcff;
+  background: #101827;
+  border-color: #34415a;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.narrative-links .app-btn:hover {
+  color: #ffffff;
+  background: #192641;
+  border-color: var(--blue);
+}
+
+.narrative-links .app-btn:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
+
+.narrative-links .app-btn:active {
+  transform: translateY(1px);
+}
+
+.narrative-foot {
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .narrative-panel {
+    padding: 17px;
+  }
+
+  .narrative-summary {
+    padding: 12px;
+    font-size: 13px;
+  }
+
+  .narrative-claim p {
+    font-size: 12px;
+  }
+
+  .narrative-head {
+    gap: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .narrative-links .app-btn {
+    transition: none;
+  }
+}

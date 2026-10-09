@@ -149,16 +149,300 @@ function pickLine(n) {
 }
 V.investigate = () => {
   const f = S.sel;
-  if (!f) return [Head("Investigate", "Why a rule matched, and the lines that show it."), h("div", { class: "empty" }, h("b", {}, "No finding selected"), "Pick one from the queue.", h("div", { class: "chips" }, Btn("Open findings", () => go("findings"), "pri")))];
-  const ev = f.evidence_preview, succ = new Set(f.episode_success_lines || []), a = auth(f), row = (k, v, c) => [h("dt", {}, k), h("dd", { class: c || "" }, v)];
-  const tl = h("ul", { class: "ev" }, ev.map((e) => { const li = h("li", { "data-ln": e.line, class: S.line === e.line ? "on" : "" }, h("button", { onclick: () => pickLine(e.line), "aria-label": `Evidence line ${e.line}` }, h("span", {}, e.line), h("span", {}, when(e.text)), h("span", {}, succ.has(e.line) ? "success" : "failed"))); return li; }));
-  const log = h("div", { class: "log", role: "list", "aria-label": "Raw log lines" }, ev.map((e) => h("div", { class: `lr ${succ.has(e.line) ? "ok" : ""} ${S.line === e.line ? "sel" : ""}`, role: "listitem", "data-ln": e.line, onclick: () => pickLine(e.line) }, h("b", {}, e.line), h("span", {}, e.text))));
-  const cb = h("button", { class: "app-btn" }, "Copy selected line"); cb.addEventListener("click", () => { const e = ev.find((x) => x.line === S.line); e ? copy(e.text, cb) : (cb.textContent = "Select a line first"); });
-  const cs = h("button", { class: "app-btn" }, "Copy finding summary"); cs.addEventListener("click", () => copy(summary(f), cs));
-  return [Head(`${TYPE[f.label] || f.label}`, `Source ${f.ip}. A rule match, not proof of intent or identity.`), h("div", { class: "panel pvp" }, PathViz(f)),
-    h("div", { class: "ws" }, h("div", {}, h("div", { class: "panel" }, h("h3", {}, "Finding facts"), h("dl", { class: "f" }, row("Source IP", f.ip, "mono"), row("First failure", f.start, "mono"), row("Last", f.end, "mono"), row("Failures", fmt(f.failures)), row("Usernames", f.users.join(", ") + (f.n_users > f.users.length ? `, … (${f.n_users} total)` : ""), "mono"), row("Authentication", a.text), row("Evidence lines", fmt(f.evidence_total)))),
-        h("div", { class: "panel" }, h("h3", {}, "Evidence timeline (select to locate in the raw log)"), tl), h("div", { class: "chips" }, cs)),
-      h("div", { class: "panel" }, h("div", { class: "logb" }, h("h3", {}, "Raw log, exact text. Green edge: successful authentication"), cb), log, f.evidence_total > ev.length ? h("p", { class: "sub" }, `Showing the first ${ev.length} of ${fmt(f.evidence_total)} evidence lines (server limit).`) : null))];
+
+  if (!f) {
+    return [
+      Head("Investigate", "Why a rule matched, and the lines that show it."),
+      h(
+        "div",
+        { class: "empty" },
+        h("b", {}, "No finding selected"),
+        "Pick one from the queue.",
+        h("div", { class: "chips" },
+          Btn("Open findings", () => go("findings"), "pri")
+        )
+      )
+    ];
+  }
+
+  // Combine detector evidence and evidence explicitly referenced
+  // by verified narrative claims. Keep original line numbers and text.
+  const rawEntries = [
+    ...(Array.isArray(f.evidence_preview) ? f.evidence_preview : []),
+    ...(Array.isArray(f.narrative_evidence) ? f.narrative_evidence : [])
+  ];
+
+  const byLine = new Map();
+
+  rawEntries.forEach((item) => {
+    const line = Number(item.line);
+
+    if (
+      Number.isInteger(line) &&
+      line > 0 &&
+      !byLine.has(line)
+    ) {
+      byLine.set(line, {
+        line,
+        text: String(item.text ?? "")
+      });
+    }
+  });
+
+  const ev = [...byLine.values()].sort((a, b) => a.line - b.line);
+  const succ = new Set(f.episode_success_lines || []);
+  const a = auth(f);
+  const row = (k, v, c) => [
+    h("dt", {}, k),
+    h("dd", { class: c || "" }, v)
+  ];
+
+  const narrative =
+    f.narrative && typeof f.narrative === "object"
+      ? f.narrative
+      : null;
+
+  const verifiedClaims = Array.isArray(narrative?.claims)
+    ? narrative.claims.filter(
+        (claim) =>
+          claim &&
+          claim.verified === true &&
+          typeof claim.text === "string"
+      )
+    : [];
+
+  const verifiedSummary =
+    narrative?.summary?.verified === true &&
+    typeof narrative.summary.text === "string"
+      ? narrative.summary
+      : null;
+
+  // Show only claims verified by the backend.
+  const claimCards = verifiedClaims.map((claim) => {
+    const references = Array.isArray(claim.evidence_lines)
+      ? claim.evidence_lines.filter(
+          (line) => Number.isInteger(line) && byLine.has(line)
+        )
+      : [];
+
+    return h(
+      "article",
+      { class: "narrative-claim" },
+      h(
+        "div",
+        { class: "narrative-claim-title" },
+        String(claim.kind || "Claim").replace(/_/g, " ")
+      ),
+      h("p", {}, claim.text),
+      h(
+        "div",
+        { class: "chips narrative-links" },
+        references.length
+          ? references.map((line) =>
+              Btn(`Line ${line}`, () => pickLine(line))
+            )
+          : h("span", { class: "sub" }, "No source lines available here")
+      ),
+      claim.evidence_truncated
+        ? h(
+            "p",
+            { class: "sub" },
+            `${fmt(claim.evidence_line_count)} supporting lines exist; only a subset is shown.`
+          )
+        : null
+    );
+  });
+
+  const narrativePanel = h(
+    "section",
+    { class: "panel narrative-panel" },
+    h(
+      "div",
+      { class: "narrative-head" },
+      h(
+        "div",
+        {},
+        h("h3", {}, "Evidence-linked explanation"),
+        h(
+          "p",
+          { class: "sub" },
+          "Deterministic claims checked against parsed events."
+        )
+      ),
+      h(
+        "span",
+        {
+          class: `pill ${
+            narrative?.status === "verified" ? "on" : ""
+          }`
+        },
+        narrative?.status === "verified"
+          ? "Verified"
+          : narrative?.status === "partial"
+            ? "Partial"
+            : "Unavailable"
+      )
+    ),
+    verifiedSummary
+      ? h("p", { class: "narrative-summary" }, verifiedSummary.text)
+      : h(
+          "p",
+          { class: "sub" },
+          "No verified summary is available. Inspect the original log evidence below."
+        ),
+    ...claimCards,
+    verifiedClaims.length === 0
+      ? h(
+          "p",
+          { class: "sub" },
+          "No verified claims are available for this finding."
+        )
+      : null,
+    narrative?.verification
+      ? h(
+          "p",
+          { class: "sub narrative-foot" },
+          `${fmt(narrative.verification.verified_claims || 0)} claims verified` +
+            (
+              narrative.verification.rejected_claims
+                ? ` · ${fmt(narrative.verification.rejected_claims)} rejected`
+                : ""
+            )
+        )
+      : null
+  );
+
+  const tl = h(
+    "ul",
+    { class: "ev" },
+    ev.map((e) => {
+      const li = h(
+        "li",
+        {
+          "data-ln": e.line,
+          class: S.line === e.line ? "on" : ""
+        },
+        h(
+          "button",
+          {
+            onclick: () => pickLine(e.line),
+            "aria-label": `Evidence line ${e.line}`
+          },
+          h("span", {}, e.line),
+          h("span", {}, when(e.text)),
+          h("span", {}, succ.has(e.line) ? "success" : "failed")
+        )
+      );
+
+      return li;
+    })
+  );
+
+  const log = h(
+    "div",
+    {
+      class: "log",
+      role: "list",
+      "aria-label": "Raw log lines"
+    },
+    ev.map((e) =>
+      h(
+        "div",
+        {
+          class: `lr ${
+            succ.has(e.line) ? "ok" : ""
+          } ${S.line === e.line ? "sel" : ""}`,
+          role: "listitem",
+          "data-ln": e.line,
+          onclick: () => pickLine(e.line)
+        },
+        h("b", {}, e.line),
+        h("span", {}, e.text)
+      )
+    )
+  );
+
+  const cb = h("button", { class: "app-btn" }, "Copy selected line");
+  cb.addEventListener("click", () => {
+    const entry = ev.find((item) => item.line === S.line);
+
+    if (entry) {
+      copy(entry.text, cb);
+    } else {
+      cb.textContent = "Select a line first";
+    }
+  });
+
+  const cs = h("button", { class: "app-btn" }, "Copy finding summary");
+  cs.addEventListener("click", () =>
+    copy(verifiedSummary?.text || summary(f), cs)
+  );
+
+  return [
+    Head(
+      `${TYPE[f.label] || f.label}`,
+      `Source ${f.ip}. A rule match, not proof of intent or identity.`
+    ),
+
+    h("div", { class: "panel pvp" }, PathViz(f)),
+
+    narrativePanel,
+
+    h(
+      "div",
+      { class: "ws" },
+      h(
+        "div",
+        {},
+        h(
+          "div",
+          { class: "panel" },
+          h("h3", {}, "Finding facts"),
+          h(
+            "dl",
+            { class: "f" },
+            row("Source IP", f.ip, "mono"),
+            row("First failure", f.start, "mono"),
+            row("Last", f.end, "mono"),
+            row("Failures", fmt(f.failures)),
+            row(
+              "Usernames",
+              f.users.join(", ") +
+                (f.n_users > f.users.length
+                  ? `, … (${f.n_users} total)`
+                  : ""),
+              "mono"
+            ),
+            row("Authentication", a.text),
+            row("Detector evidence lines", fmt(f.evidence_total))
+          )
+        ),
+        h(
+          "div",
+          { class: "panel" },
+          h("h3", {}, "Evidence timeline — select a line to locate it"),
+          tl,
+          h("div", { class: "chips" }, cs)
+        )
+      ),
+      h(
+        "div",
+        { class: "panel" },
+        h(
+          "div",
+          { class: "logb" },
+          h("h3", {}, "Raw log — exact source text"),
+          cb
+        ),
+        log,
+        h(
+          "p",
+          { class: "sub" },
+          `Showing ${fmt(ev.length)} source lines available to this investigation, including narrative references. Detector evidence total: ${fmt(f.evidence_total)}.`
+        )
+      )
+    )
+  ];
 };
 V.chronicle = () => {
   if (!list().length) return [Head("Chronicle", "What was observed, and in what order?"), S.data ? h("div", { class: "empty" }, h("b", {}, "No findings to order")) : need("The chronicle")];
