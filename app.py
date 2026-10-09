@@ -27,6 +27,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from munshi.detectors import Config, detect
 from munshi.evaluate import score
 from munshi.parsing import parse_file, parse_lines
+from munshi.narrative import build_narrative
 
 ROOT = Path(__file__).resolve().parent
 SAMPLES = {
@@ -57,15 +58,50 @@ def finding_to_dict(f, raw_by_line):
 
 
 def analyze(parsed):
-    findings = detect(parsed.events, Config())
-    raw = {e.line_no: e.raw for e in parsed.events}
+    config = Config()
+    findings = detect(parsed.events, config)
+    raw = {event.line_no: event.raw for event in parsed.events}
+
+    serialized_findings = []
+
+    for finding in findings:
+        item = finding_to_dict(finding, raw)
+
+        narrative = build_narrative(
+            finding,
+            parsed.events,
+            config,
+            max_evidence_lines=EVIDENCE_PREVIEW,
+        )
+
+        # Collect the unique source lines referenced by verified claims.
+        referenced_lines = sorted({
+            line
+            for claim in narrative.get("claims", [])
+            if claim.get("verified") is True
+            for line in claim.get("evidence_lines", [])
+            if isinstance(line, int) and line in raw
+        })
+
+        # Preserve all existing finding fields and add the narrative.
+        item["narrative"] = narrative
+        item["narrative_evidence"] = [
+            {"line": line, "text": raw[line]}
+            for line in referenced_lines
+        ]
+
+        serialized_findings.append(item)
+
     return {
         "summary": {
-            "events": len(parsed.events), "skipped": len(parsed.skipped),
+            "events": len(parsed.events),
+            "skipped": len(parsed.skipped),
             "findings": len(findings),
-            "compromises": sum(1 for f in findings if f.compromised),
+            "compromises": sum(
+                1 for finding in findings if finding.compromised
+            ),
         },
-        "findings": [finding_to_dict(f, raw) for f in findings],
+        "findings": serialized_findings,
     }
 
 
