@@ -41,7 +41,23 @@ class TestRules(unittest.TestCase):
         f = detect(events)[0]
         self.assertEqual(f.label, "brute_force_success")
         self.assertEqual(f.compromised_user, "carol")
-        self.assertIn(31, f.evidence)           # the winning login is cited as evidence
+        self.assertEqual(f.episode_success_users, ["carol"])
+        self.assertEqual(f.episode_success_lines, [31])
+        self.assertIn(31, f.evidence)           # the successful login is cited as evidence
+
+    def test_multiple_successes_during_episode_are_preserved_as_context(self):
+        events = [ev(i, i * 4, "user1", "9.9.9.9") for i in range(1, 13)]
+        events.extend([
+            ev(20, 48, "user1", "9.9.9.9", success=True),
+            ev(21, 60, "user2", "9.9.9.9", success=True),
+            ev(22, 72, "user3", "9.9.9.9", success=True),
+        ])
+        f = detect(events)[0]
+        self.assertFalse(f.compromised)
+        self.assertIsNone(f.compromised_user)
+        self.assertEqual(f.label, "brute_force")
+        self.assertEqual(f.episode_success_users, ["user1", "user2", "user3"])
+        self.assertEqual(f.episode_success_lines, [20, 21, 22])
 
     def test_success_from_a_different_ip_is_not_compromise(self):
         events = [ev(i, i * 4, "carol", "9.9.9.9") for i in range(1, 31)]

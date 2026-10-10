@@ -22,11 +22,12 @@ import io
 import json
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, redirect, request, send_from_directory
 
 from munshi.detectors import Config, detect
 from munshi.evaluate import score
 from munshi.parsing import parse_file, parse_lines
+from munshi.narrative import build_narrative
 
 ROOT = Path(__file__).resolve().parent
 SAMPLES = {
@@ -44,9 +45,14 @@ def finding_to_dict(f, raw_by_line):
     """Turn a Finding into plain JSON-safe data for the page."""
     return {
         "kind": f.kind, "label": f.label, "ip": f.ip,
+        "source_ips": getattr(f, "source_ips", None) or [f.ip],
+        "n_source_ips": len(getattr(f, "source_ips", None) or [f.ip]),
         "start": f.start.isoformat(sep=" "), "end": f.end.isoformat(sep=" "),
         "failures": f.failures, "n_users": len(f.users), "users": f.users[:10],
         "compromised": f.compromised, "compromised_user": f.compromised_user,
+        "episode_success_users": f.episode_success_users,
+        "episode_success_count": len(f.episode_success_users),
+        "episode_success_lines": f.episode_success_lines,
         "evidence_total": len(f.evidence),
         "evidence_preview": [{"line": n, "text": raw_by_line.get(n, "")}
                              for n in f.evidence[:EVIDENCE_PREVIEW]],
@@ -54,15 +60,50 @@ def finding_to_dict(f, raw_by_line):
 
 
 def analyze(parsed):
-    findings = detect(parsed.events, Config())
-    raw = {e.line_no: e.raw for e in parsed.events}
+    config = Config()
+    findings = detect(parsed.events, config)
+    raw = {event.line_no: event.raw for event in parsed.events}
+
+    serialized_findings = []
+
+    for finding in findings:
+        item = finding_to_dict(finding, raw)
+
+        narrative = build_narrative(
+            finding,
+            parsed.events,
+            config,
+            max_evidence_lines=EVIDENCE_PREVIEW,
+        )
+
+        # Collect the unique source lines referenced by verified claims.
+        referenced_lines = sorted({
+            line
+            for claim in narrative.get("claims", [])
+            if claim.get("verified") is True
+            for line in claim.get("evidence_lines", [])
+            if isinstance(line, int) and line in raw
+        })
+
+        # Preserve all existing finding fields and add the narrative.
+        item["narrative"] = narrative
+        item["narrative_evidence"] = [
+            {"line": line, "text": raw[line]}
+            for line in referenced_lines
+        ]
+
+        serialized_findings.append(item)
+
     return {
         "summary": {
-            "events": len(parsed.events), "skipped": len(parsed.skipped),
+            "events": len(parsed.events),
+            "skipped": len(parsed.skipped),
             "findings": len(findings),
-            "compromises": sum(1 for f in findings if f.compromised),
+            "compromises": sum(
+                1 for finding in findings if finding.compromised
+            ),
         },
-        "findings": [finding_to_dict(f, raw) for f in findings],
+        "findings": serialized_findings,
     }
 
 
@@ -80,7 +121,7 @@ def create_app():
 
     @app.get("/")
     def index():
-        return send_from_directory(app.static_folder, "index.html")
+        return redirect("/static/munshi-vnext/index.html")
 
     @app.post("/api/analyze")
     def api_analyze():

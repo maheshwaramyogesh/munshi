@@ -284,24 +284,50 @@ def write_log(events, path):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Generate fake SSH logs with planted attacks.")
-    ap.add_argument("--hard", action="store_true", help="add hard innocents and stealth attacks")
+    ap = argparse.ArgumentParser(
+        description="Generate fake SSH logs with planted attacks."
+    )
+    ap.add_argument(
+        "--hard",
+        action="store_true",
+        help="add hard innocents and stealth attacks",
+    )
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=SEED,
+        help=f"random seed for reproducible data (default: {SEED})",
+    )
+
+    ap.add_argument(
+        "--out-dir",
+        default="logs",
+        help="directory for generated files (default: logs)",
+    )
     args = ap.parse_args()
+
+    # Reset the random generator before creating any events.
+    random.seed(args.seed)
 
     # The easy part runs first and uses the random generator exactly as before,
     # so the easy data is identical whether or not --hard is used.
     normal = normal_traffic()
     attacks, truth = plant_attacks()
-    os.makedirs("logs", exist_ok=True)
+    os.makedirs(args.out_dir, exist_ok=True)
 
     if not args.hard:
         all_events = sorted(normal + attacks, key=lambda e: e[0])
-        write_log(all_events, "logs/auth.log")
-        with open("logs/ground_truth.json", "w") as f:
+
+        auth_path = os.path.join(args.out_dir, "auth.log")
+        truth_path = os.path.join(args.out_dir, "ground_truth.json")
+
+        write_log(all_events, auth_path)
+        with open(truth_path, "w") as f:
             json.dump(truth, f, indent=2)
-        print(f"Wrote logs/auth.log          : {len(all_events)} lines "
+
+        print(f"Wrote {auth_path}: {len(all_events)} lines "
               f"({len(normal)} normal, {len(attacks)} attack)")
-        print(f"Wrote logs/ground_truth.json : {len(truth)} planted attacks")
+        print(f"Wrote {truth_path}: {len(truth)} planted attacks")
         return
 
     for a in truth:                       # label the original 10 as "loud"
@@ -312,15 +338,24 @@ def main():
     all_truth = truth + hard_truth
     all_events = normal + attacks + inn_events + atk_events
 
-    write_log(all_events, "logs/auth_hard.log")
-    with open("logs/ground_truth_hard.json", "w") as f:
+    auth_path = os.path.join(args.out_dir, "auth_hard.log")
+    truth_path = os.path.join(args.out_dir, "ground_truth_hard.json")
+    benign_path = os.path.join(args.out_dir, "benign_hard.json")
+
+    write_log(all_events, auth_path)
+
+    with open(truth_path, "w") as f:
         json.dump(all_truth, f, indent=2)
-    with open("logs/benign_hard.json", "w") as f:
+
+    with open(benign_path, "w") as f:
         json.dump(benign, f, indent=2)
-    print(f"Wrote logs/auth_hard.log          : {len(all_events)} lines")
-    print(f"Wrote logs/ground_truth_hard.json : {len(all_truth)} attacks "
-          f"({len(truth)} loud + {len(hard_truth)} stealthy)")
-    print(f"Wrote logs/benign_hard.json       : {len(benign)} hard innocent cases")
+
+    print(f"Wrote {auth_path}: {len(all_events)} lines")
+    print(
+        f"Wrote {truth_path}: {len(all_truth)} attacks "
+        f"({len(truth)} loud + {len(hard_truth)} stealthy)"
+    )
+    print(f"Wrote {benign_path}: {len(benign)} hard innocent cases")
 
 
 if __name__ == "__main__":
