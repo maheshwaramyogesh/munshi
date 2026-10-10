@@ -178,6 +178,68 @@ class TestDistributedDetection(unittest.TestCase):
         self.assertEqual(len(finding.users), 54)
         self.assertEqual(finding.evidence, list(range(1, 61)))
 
+    def test_distributed_tail_does_not_suppress_full_brute_force_episode(self):
+        events = []
+        line_no = 1
+
+        # One sustained brute-force episode: 70 failures before the
+        # distributed campaign, followed by five failures during it.
+        for attempt in range(70):
+            events.append(make_event(
+                line_no,
+                seconds=attempt * 7,
+                user="root",
+                ip=ATTACK_IP,
+            ))
+            line_no += 1
+
+        for attempt in range(5):
+            events.append(make_event(
+                line_no,
+                seconds=550 + attempt * 10,
+                user="root",
+                ip=ATTACK_IP,
+            ))
+            line_no += 1
+
+        # A distributed spray begins at the same time as the final
+        # brute-force attempts. Its evidence overlaps only the tail.
+        for source_index in range(20):
+            ip = f"203.0.113.{50 + source_index}"
+
+            for attempt in range(3):
+                events.append(make_event(
+                    line_no,
+                    seconds=550 + source_index * 90 + attempt * 10,
+                    user=f"guess{(source_index * 3 + attempt) % 54}",
+                    ip=ip,
+                ))
+                line_no += 1
+
+        findings = detect(events)
+
+        # The complete brute-force episode must remain available.
+        brute_force_findings = [
+            finding for finding in findings
+            if finding.ip == ATTACK_IP
+        ]
+
+        self.assertEqual(len(brute_force_findings), 1)
+        brute_force = brute_force_findings[0]
+
+        self.assertEqual(brute_force.kind, "brute_force")
+        self.assertEqual(brute_force.failures, 75)
+        self.assertEqual(brute_force.evidence, list(range(1, 76)))
+
+        # Distributed detection should still identify the campaign.
+        campaigns = [
+            finding for finding in findings
+            if len(finding.source_ips) > 1
+        ]
+
+        self.assertTrue(campaigns)
+        self.assertIn(ATTACK_IP, campaigns[0].source_ips)
+
     def test_sparse_failures_across_ips_do_not_trigger_campaign(self):
         findings = detect(make_sparse_distributed_noise())
 

@@ -497,12 +497,35 @@ def detect(events: List[Event], config: Config = Config()) -> List[Finding]:
 
     covered_lines = burst_lines | slow_lines | distributed_lines
 
-    # Replace basic findings that overlap advanced detections.
+    # Suppress a basic finding only when advanced detections cover most
+    # of its failed-authentication evidence. A handful of overlapping
+    # tail events must not erase a much larger brute-force episode.
+    failure_line_numbers = {
+        event.line_no for event in events if not event.success
+    }
+
     if covered_lines:
-        findings = [
-            finding for finding in findings
-            if not covered_lines.intersection(finding.evidence)
-        ]
+        retained_findings = []
+
+        for finding in findings:
+            failure_evidence = [
+                line for line in finding.evidence
+                if line in failure_line_numbers
+            ]
+            covered_failure_evidence = [
+                line for line in failure_evidence
+                if line in covered_lines
+            ]
+
+            overlap_ratio = (
+                len(covered_failure_evidence) / len(failure_evidence)
+                if failure_evidence else 0.0
+            )
+
+            if overlap_ratio < 0.70:
+                retained_findings.append(finding)
+
+        findings = retained_findings
 
     findings.extend(advanced_findings)
     findings.extend(slow_findings)
