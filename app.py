@@ -22,7 +22,7 @@ import io
 import json
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, redirect, request, send_from_directory
 
 from munshi.detectors import Config, detect
 from munshi.evaluate import score
@@ -45,6 +45,8 @@ def finding_to_dict(f, raw_by_line):
     """Turn a Finding into plain JSON-safe data for the page."""
     return {
         "kind": f.kind, "label": f.label, "ip": f.ip,
+        "source_ips": getattr(f, "source_ips", None) or [f.ip],
+        "n_source_ips": len(getattr(f, "source_ips", None) or [f.ip]),
         "start": f.start.isoformat(sep=" "), "end": f.end.isoformat(sep=" "),
         "failures": f.failures, "n_users": len(f.users), "users": f.users[:10],
         "compromised": f.compromised, "compromised_user": f.compromised_user,
@@ -119,7 +121,7 @@ def create_app():
 
     @app.get("/")
     def index():
-        return send_from_directory(app.static_folder, "index.html")
+        return redirect("/static/munshi-vnext/index.html")
 
     @app.post("/api/analyze")
     def api_analyze():

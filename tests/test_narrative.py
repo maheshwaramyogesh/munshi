@@ -150,6 +150,91 @@ class TestNarrative(unittest.TestCase):
         self.assertEqual(auth_claim["evidence_lines"], [])
         self.assertEqual(auth_claim["verification_method"], "complete_parsed_event_window_check")
 
+    def test_distributed_campaign_narrative_is_verified_and_cautious(self):
+        base = datetime(2026, 10, 1, 9, 0, 0)
+        events = []
+
+        for source_index in range(20):
+            ip = f"203.0.113.{50 + source_index}"
+
+            for attempt in range(3):
+                line_no = len(events) + 1
+                when = base + timedelta(seconds=line_no - 1)
+                user = f"user{(source_index * 3 + attempt) % 54}"
+
+                events.append(Event(
+                    line_no=line_no,
+                    time=when,
+                    host="server01",
+                    user=user,
+                    ip=ip,
+                    port=22,
+                    success=False,
+                    invalid_user=False,
+                    raw=(
+                        f"{when.strftime('%b %d %H:%M:%S')} "
+                        f"server01 sshd[1]: Failed password for "
+                        f"{user} from {ip} port 22 ssh2"
+                    ),
+                ))
+
+        events.sort(key=lambda event: (event.time, event.line_no))
+        findings = detect(events, Config())
+
+        distributed_findings = [
+            finding
+            for finding in findings
+            if len(finding.source_ips) > 1
+        ]
+
+        self.assertEqual(len(distributed_findings), 1)
+
+        finding = distributed_findings[0]
+        narrative = build_narrative(finding, events)
+
+        self.assertEqual(narrative["status"], "verified")
+
+        # The summary must describe the campaign, not only its
+        # representative IP address.
+        summary = narrative["summary"]
+        self.assertTrue(summary["verified"])
+        self.assertIn("distributed", summary["text"])
+        self.assertIn("20 source IPs", summary["text"])
+        self.assertIn("60 failed authentication attempts", summary["text"])
+
+        claims = {
+            claim["kind"]: claim
+            for claim in narrative["claims"]
+        }
+
+        # The specific source-IP claim must cite events from that IP.
+        source_claim = claims["source_ip"]
+        self.assertTrue(source_claim["verified"])
+
+        events_by_line = {
+            event.line_no: event
+            for event in events
+        }
+
+        self.assertTrue(source_claim["evidence_lines"])
+        self.assertTrue(all(
+            events_by_line[line].ip == finding.ip
+            and not events_by_line[line].success
+            for line in source_claim["evidence_lines"]
+        ))
+
+        # Distributed detection must not imply that successful-login
+        # attribution was assessed or that compromise was confirmed.
+        auth_claim = claims["authentication_context"]
+        self.assertTrue(auth_claim["verified"])
+        self.assertFalse(auth_claim["value"]["assessed"])
+        self.assertIsNone(auth_claim["value"]["observed"])
+        self.assertIsNone(auth_claim["value"]["compromised"])
+        self.assertIn(
+            "attribution was not assessed",
+            auth_claim["text"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

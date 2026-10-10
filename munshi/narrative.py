@@ -46,9 +46,19 @@ def _derive_facts(
     if any(line not in by_line for line in evidence_lines):
         return None, "finding_references_missing_event"
 
+    source_ips = sorted(
+        set(getattr(finding, "source_ips", []) or [finding.ip])
+    )
+
+    if finding.ip not in source_ips:
+        return None, "representative_source_ip_not_in_source_set"
+
     evidence_events = [by_line[line] for line in evidence_lines]
-    if any(event.ip != finding.ip for event in evidence_events):
+
+    if any(event.ip not in source_ips for event in evidence_events):
         return None, "evidence_source_ip_mismatch"
+
+    is_distributed = len(source_ips) > 1
 
     failure_events = [event for event in evidence_events if not event.success]
     if len(failure_events) != finding.failures or not failure_events:
@@ -79,50 +89,91 @@ def _derive_facts(
     if finding.kind != expected_kind:
         return None, "finding_kind_does_not_match_failure_pattern"
 
-    # Recreate the detector's post-episode success window from the last failed
-    # event, not finding.end (which can include the first later success).
-    window_end = failure_end + config.success_window
-    same_ip_successes = _ordered_events(
-        event for event in events
-        if event.ip == finding.ip and event.success
-    )
-    contextual_successes = [
-        event for event in same_ip_successes
-        if finding.start <= event.time <= window_end
-    ]
-    contextual_lines = [event.line_no for event in contextual_successes]
-    contextual_users = sorted({event.user for event in contextual_successes})
+    # Distributed campaigns aggregate failures from multiple IPs. The
+    # detector does not attribute successful logins to those campaigns.
+    if is_distributed:
+        contextual_lines = []
+        contextual_users = []
+        post_episode_successes = []
 
-    if contextual_lines != list(finding.episode_success_lines):
-        return None, "authentication_context_lines_do_not_match_events"
-    if contextual_users != sorted(set(finding.episode_success_users)):
-        return None, "authentication_context_users_do_not_match_events"
+        ambiguous = None
+        expected_compromised = False
+        expected_compromised_user = None
+        window_end = None
 
-    post_episode_successes = [
-        event for event in same_ip_successes
-        if failure_end <= event.time <= window_end
-    ]
-    expected_evidence = failure_lines + [
-        event.line_no for event in post_episode_successes
-    ]
+        if finding.episode_success_lines:
+            return None, "distributed_finding_has_unexpected_success_context"
+
+        if finding.episode_success_users:
+            return None, "distributed_finding_has_unexpected_success_context"
+
+        if finding.compromised or finding.compromised_user is not None:
+            return None, "authentication_interpretation_mismatch"
+
+        expected_evidence = failure_lines
+        expected_end = failure_end
+
+    else:
+        # Recreate the detector's single-IP success window.
+        window_end = failure_end + config.success_window
+
+        same_ip_successes = _ordered_events(
+            event for event in events
+            if event.ip == finding.ip and event.success
+        )
+
+        contextual_successes = [
+            event for event in same_ip_successes
+            if finding.start <= event.time <= window_end
+        ]
+
+        contextual_lines = [
+            event.line_no for event in contextual_successes
+        ]
+        contextual_users = sorted({
+            event.user for event in contextual_successes
+        })
+
+        if contextual_lines != list(finding.episode_success_lines):
+            return None, "authentication_context_lines_do_not_match_events"
+
+        if contextual_users != sorted(set(finding.episode_success_users)):
+            return None, "authentication_context_users_do_not_match_events"
+
+        post_episode_successes = [
+            event for event in same_ip_successes
+            if failure_end <= event.time <= window_end
+        ]
+
+        expected_evidence = failure_lines + [
+            event.line_no for event in post_episode_successes
+        ]
+
+        ambiguous = len(contextual_users) > 1
+        expected_compromised = bool(post_episode_successes) and not ambiguous
+
+        expected_compromised_user = (
+            post_episode_successes[0].user
+            if expected_compromised else None
+        )
+
+        if finding.compromised != expected_compromised:
+            return None, "authentication_interpretation_mismatch"
+
+        if finding.compromised_user != expected_compromised_user:
+            return None, "authentication_user_mismatch"
+
+        expected_end = (
+            post_episode_successes[0].time
+            if post_episode_successes else failure_end
+        )
+
     if evidence_lines != expected_evidence:
         return None, "finding_evidence_does_not_match_detector_window"
 
-    ambiguous = len(contextual_users) > 1
-    expected_compromised = bool(post_episode_successes) and not ambiguous
-    expected_compromised_user = (
-        post_episode_successes[0].user if expected_compromised else None
-    )
-    if finding.compromised != expected_compromised:
-        return None, "authentication_interpretation_mismatch"
-    if finding.compromised_user != expected_compromised_user:
-        return None, "authentication_user_mismatch"
-
-    expected_end = (
-        post_episode_successes[0].time if post_episode_successes else failure_end
-    )
     if finding.end != expected_end:
         return None, "finding_end_time_mismatch"
+
 
     expected_label = (
         "brute_force_success"
@@ -134,10 +185,17 @@ def _derive_facts(
 
     return {
         "ip": finding.ip,
+        "source_ips": source_ips,
+        "is_distributed": is_distributed,
         "kind": finding.kind,
         "label": expected_label,
         "failure_count": len(failure_events),
         "failure_lines": failure_lines,
+        "representative_failure_lines": [
+            event.line_no
+            for event in failure_events
+            if event.ip == finding.ip
+        ],
         "users": failed_users,
         "contextual_success_lines": contextual_lines,
         "contextual_success_users": contextual_users,
@@ -155,6 +213,9 @@ def _limited_lines(lines: Sequence[int], limit: int) -> List[int]:
 
 def _draft_claims(facts: Mapping[str, Any], max_evidence_lines: int) -> List[Dict[str, Any]]:
     failure_lines = facts["failure_lines"]
+    representative_lines = facts.get(
+        "representative_failure_lines", failure_lines
+    )
     context_lines = facts["contextual_success_lines"]
     context_users = facts["contextual_success_users"]
     failure_count = facts["failure_count"]
@@ -172,13 +233,22 @@ def _draft_claims(facts: Mapping[str, Any], max_evidence_lines: int) -> List[Dic
             "evidence_truncated": len(failure_lines) > min(5, max_evidence_lines),
             "verification_method": "detector_result_and_parsed_failures",
         },
-        {
+                {
             "kind": "source_ip",
             "value": ip,
-            "text": f"Repeated failed authentication attempts were recorded from source IP {ip}.",
-            "evidence_lines": _limited_lines(failure_lines, min(5, max_evidence_lines)),
-            "evidence_line_count": len(failure_lines),
-            "evidence_truncated": len(failure_lines) > min(5, max_evidence_lines),
+            "text": (
+                f"Representative source IP {ip} participated in the "
+                "distributed campaign."
+                if facts.get("is_distributed", False)
+                else f"Repeated failed authentication attempts were recorded from source IP {ip}."
+            ),
+            "evidence_lines": _limited_lines(
+                representative_lines, min(5, max_evidence_lines)
+            ),
+            "evidence_line_count": len(representative_lines),
+            "evidence_truncated": (
+                len(representative_lines) > min(5, max_evidence_lines)
+            ),
             "verification_method": "source_ip_match_on_parsed_events",
         },
         {
@@ -201,18 +271,34 @@ def _draft_claims(facts: Mapping[str, Any], max_evidence_lines: int) -> List[Dic
         },
     ]
 
-    if len(context_users) > 1:
+    if facts.get("is_distributed", False):
+        auth_text = (
+            "Successful-login attribution was not assessed for this "
+            "distributed campaign. The finding aggregates failed "
+            "authentication attempts from multiple source IPs and "
+            "does not establish compromise."
+        )
+        auth_value = {
+            "assessed": False,
+            "observed": None,
+            "users": [],
+            "ambiguous": None,
+            "compromised": None,
+        }
+
+    elif len(context_users) > 1:
         auth_text = (
             "Successful authentication activity was observed for "
             f"{len(context_users)} distinct usernames in this source-IP context; "
             "attribution remains ambiguous and this does not by itself establish compromise."
         )
-        auth_value: Dict[str, Any] = {
+        auth_value = {
             "observed": True,
             "users": list(context_users),
             "ambiguous": True,
             "compromised": False,
         }
+
     elif len(context_users) == 1:
         auth_text = (
             "A successful authentication was observed for username "
@@ -225,6 +311,7 @@ def _draft_claims(facts: Mapping[str, Any], max_evidence_lines: int) -> List[Dic
             "ambiguous": False,
             "compromised": bool(facts["compromised"]),
         }
+
     else:
         auth_text = (
             "No successful authentication was observed for this source IP "
@@ -244,8 +331,14 @@ def _draft_claims(facts: Mapping[str, Any], max_evidence_lines: int) -> List[Dic
         "evidence_lines": _limited_lines(context_lines, max_evidence_lines),
         "evidence_line_count": len(context_lines),
         "evidence_truncated": len(context_lines) > max_evidence_lines,
-        "verification_method": (
-            "successful_event_line_references" if context_lines else "complete_parsed_event_window_check"
+                "verification_method": (
+            "distributed_success_context_not_assessed"
+            if facts.get("is_distributed", False)
+            else (
+                "successful_event_line_references"
+                if context_lines
+                else "complete_parsed_event_window_check"
+            )
         ),
     })
     return claims
@@ -293,12 +386,43 @@ def verify_claim(
     if any(line not in by_line for line in claim_lines):
         return {"verified": False, "reason": "claim_references_missing_event"}
 
-    if kind in {"classification", "source_ip", "failure_count", "targeted_username_count"}:
-        if any(by_line[line].success or by_line[line].ip != finding.ip for line in claim_lines):
-            return {"verified": False, "reason": "claim_evidence_is_not_a_matching_failure"}
+    source_ips = set(
+        getattr(finding, "source_ips", None) or [finding.ip]
+    )
+
+    if kind == "source_ip":
+        if any(
+            by_line[line].success or by_line[line].ip != finding.ip
+            for line in claim_lines
+        ):
+            return {
+                "verified": False,
+                "reason": "claim_evidence_is_not_a_matching_failure",
+            }
+
+    elif kind in {
+        "classification",
+        "failure_count",
+        "targeted_username_count",
+    }:
+        if any(
+            by_line[line].success or by_line[line].ip not in source_ips
+            for line in claim_lines
+        ):
+            return {
+                "verified": False,
+                "reason": "claim_evidence_is_not_a_matching_failure",
+            }
+
     elif kind == "authentication_context":
-        if any(not by_line[line].success or by_line[line].ip != finding.ip for line in claim_lines):
-            return {"verified": False, "reason": "claim_evidence_is_not_a_matching_success"}
+        if any(
+            not by_line[line].success or by_line[line].ip not in source_ips
+            for line in claim_lines
+        ):
+            return {
+                "verified": False,
+                "reason": "claim_evidence_is_not_a_matching_success",
+            }
 
     return {"verified": True, "reason": "verified_against_parsed_events"}
 
@@ -350,11 +474,20 @@ def build_narrative(
         failure_lines = facts["failure_lines"]
 
         summary = {
-            "text": (
+                  "text": (
+            (
+                f"Munshi classified a distributed "
+                f"{_PATTERN_NAMES[facts['label']]} campaign involving "
+                f"{len(facts['source_ips'])} source IPs, with "
+                f"{facts['failure_count']} failed authentication attempts."
+            )
+            if facts.get("is_distributed", False)
+            else (
                 f"Munshi classified a {_PATTERN_NAMES[facts['label']]} "
                 f"from {facts['ip']}, with "
                 f"{facts['failure_count']} failed authentication attempts."
-            ),
+            )
+        ),
             "verified": True,
             "supporting_claims": supporting_claims,
             "evidence_lines": _limited_lines(

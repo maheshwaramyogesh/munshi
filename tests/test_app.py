@@ -24,8 +24,9 @@ class TestWeb(unittest.TestCase):
         self.client = create_app().test_client()
 
     def test_index_page_loads_and_has_security_headers(self):
-        r = self.client.get("/")
+        r = self.client.get("/", follow_redirects=True)
         self.assertEqual(r.status_code, 200)
+        self.assertIn(b"Munshi: every signal, accounted for", r.data)
         self.assertIn("default-src 'self'", r.headers["Content-Security-Policy"])
         self.assertEqual(r.headers["X-Content-Type-Options"], "nosniff")
 
@@ -56,6 +57,87 @@ class TestWeb(unittest.TestCase):
         self.assertEqual(r.get_json()["summary"]["findings"], 1)
         self.assertIn(evil, r.get_json()["findings"][0]["users"])   # kept as plain data
 
+    def test_distributed_campaign_fields_are_exposed_by_api(self):
+        lines = []
+
+        for source_index in range(20):
+            ip = f"203.0.113.{50 + source_index}"
+
+            for attempt in range(3):
+                event_index = len(lines)
+                minute, second = divmod(event_index, 60)
+                timestamp = f"Oct  1 09:{minute:02d}:{second:02d}"
+                user = f"user{(source_index * 3 + attempt) % 54}"
+
+                lines.append(
+                    f"{timestamp} server01 sshd[1]: Failed password for "
+                    f"{user} from {ip} port 22 ssh2"
+                )
+
+        log_text = "\n".join(lines) + "\n"
+
+        response = self.client.post(
+            "/api/analyze",
+            data={
+                "logfile": (
+                    io.BytesIO(log_text.encode("utf-8")),
+                    "distributed.log",
+                )
+            },
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+
+        campaigns = [
+            finding
+            for finding in data["findings"]
+            if finding.get("n_source_ips", 0) > 1
+        ]
+
+        self.assertEqual(len(campaigns), 1)
+        campaign = campaigns[0]
+
+        # All participating IPs and failures must reach the API response.
+        self.assertEqual(campaign["n_source_ips"], 20)
+        self.assertEqual(len(campaign["source_ips"]), 20)
+        self.assertEqual(campaign["failures"], 60)
+
+        # The narrative must describe the campaign accurately.
+        narrative = campaign["narrative"]
+        self.assertEqual(narrative["status"], "verified")
+
+        summary = narrative["summary"]
+        self.assertTrue(summary["verified"])
+        self.assertIn("20 source IPs", summary["text"])
+        self.assertIn("60 failed authentication attempts", summary["text"])
+
+        claims = {
+            claim["kind"]: claim
+            for claim in narrative["claims"]
+        }
+
+        auth_claim = claims["authentication_context"]
+        self.assertTrue(auth_claim["verified"])
+        self.assertFalse(auth_claim["value"]["assessed"])
+        self.assertIsNone(auth_claim["value"]["observed"])
+        self.assertIsNone(auth_claim["value"]["compromised"])
+
+        # Every API narrative-evidence line must come from a verified claim.
+        expected_lines = {
+            line
+            for claim in narrative["claims"]
+            if claim.get("verified") is True
+            for line in claim.get("evidence_lines", [])
+        }
+        api_lines = {
+            item["line"]
+            for item in campaign["narrative_evidence"]
+        }
+
+        self.assertEqual(api_lines, expected_lines)
+
     @unittest.skipUnless(HAVE_DATA, "run generate_logs.py and generate_logs.py --hard first")
     def test_easy_sample_matches_known_planted_attacks(self):
         d = self.client.post("/api/analyze", json={"sample": "easy"}).get_json()
@@ -68,7 +150,7 @@ class TestWeb(unittest.TestCase):
         easy = self.client.get("/api/score?set=easy").get_json()
         hard = self.client.get("/api/score?set=hard").get_json()
         self.assertEqual((easy["detected"], easy["planted"], easy["false_alarms"]), (10, 10, 0))
-        self.assertEqual((hard["detected"], hard["planted"], hard["false_alarms"]), (10, 16, 2))
+        self.assertEqual((hard["detected"], hard["planted"], hard["false_alarms"]), (16, 16, 2))
 
 
 if __name__ == "__main__":
