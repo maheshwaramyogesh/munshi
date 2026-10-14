@@ -34,6 +34,7 @@ class Config:
     episode_gap: timedelta = timedelta(minutes=15)  # a longer pause starts a new episode
     spray_min_users: int = 8                        # spray needs at least this many usernames...
     spray_user_ratio: float = 0.6                   # ...and distinct users / failures >= this
+    spray_max_failures_per_user: int = 3            # ...or only a few tries per username
     success_window: timedelta = timedelta(minutes=10)  # a login this soon after = "got in"
 
         # Correlate repeated short bursts without lowering min_failures.
@@ -101,6 +102,23 @@ def _split_episodes(failures: List[Event], gap: timedelta) -> List[List[Event]]:
     if current:
         episodes.append(current)
     return episodes
+
+def looks_like_single_ip_spray(
+    failures: List[Event],
+    users: List[str],
+    config: Config,
+) -> bool:
+    """Return True when one source IP shows a broad username spray."""
+    if len(users) < config.spray_min_users:
+        return False
+
+    if len(users) / len(failures) >= config.spray_user_ratio:
+        return True
+
+    failures_by_user = Counter(event.user for event in failures)
+    busiest_user_failures = max(failures_by_user.values(), default=0)
+
+    return busiest_user_failures <= config.spray_max_failures_per_user
 
 def _detect_threshold_dodgers(events: List[Event], config: Config):
     """Correlate repeated short failure bursts for the same IP and username."""
@@ -448,8 +466,11 @@ def detect(events: List[Event], config: Config = Config()) -> List[Finding]:
                 continue                                  # just noise
 
             users = sorted({e.user for e in ep})
-            looks_like_spray = (len(users) >= config.spray_min_users and
-                                len(users) / len(ep) >= config.spray_user_ratio)
+            looks_like_spray = looks_like_single_ip_spray(
+                ep,
+                users,
+                config,
+            )
             kind = "password_spray" if looks_like_spray else "brute_force"
 
             start, end = ep[0].time, ep[-1].time

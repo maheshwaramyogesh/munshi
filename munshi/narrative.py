@@ -10,7 +10,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from .detectors import Config, Finding
+from .detectors import Config, Finding, looks_like_single_ip_spray
 from .parsing import Event
 
 
@@ -102,10 +102,10 @@ def _derive_facts(
             return None, "distributed_campaign_does_not_match_rule"
         expected_kind = "password_spray"
     else:
-        looks_like_spray = (
-            len(failed_users) >= config.spray_min_users
-            and len(failed_users) / len(failure_events)
-            >= config.spray_user_ratio
+        looks_like_spray = looks_like_single_ip_spray(
+            failure_events,
+            failed_users,
+            config,
         )
         expected_kind = (
             "password_spray" if looks_like_spray else "brute_force"
