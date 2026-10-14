@@ -6,6 +6,7 @@ finding and the complete parsed event set before returning it.
 """
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -75,16 +76,40 @@ def _derive_facts(
     if failed_users != sorted(set(finding.users)):
         return None, "targeted_users_do_not_match_evidence"
 
-            # Independently recalculate the attack type from failed events.
-    looks_like_spray = (
-        len(failed_users) >= config.spray_min_users
-        and len(failed_users) / len(failure_events)
-        >= config.spray_user_ratio
-    )
-
-    expected_kind = (
-        "password_spray" if looks_like_spray else "brute_force"
-    )
+    # Re-derive the expected type using the rule family that produced the
+    # finding. Distributed campaigns use their own, less strict username
+    # ratio than the single-IP spray rule; applying the single-IP threshold
+    # here incorrectly rejects valid distributed findings as unavailable.
+    if is_distributed:
+        counts_by_ip = Counter(event.ip for event in failure_events)
+        actual_source_ips = set(counts_by_ip)
+        username_ratio = len(failed_users) / len(failure_events)
+        distributed_pattern_matches = (
+            actual_source_ips == set(source_ips)
+            and len(source_ips) >= config.distributed_min_ips
+            and len(failure_events) >= config.distributed_min_total_failures
+            and all(
+                config.distributed_min_failures_per_ip
+                <= count
+                <= config.distributed_max_failures_per_ip
+                for count in counts_by_ip.values()
+            )
+            and len(failed_users) >= config.distributed_min_users
+            and username_ratio >= config.distributed_min_user_ratio
+            and failure_end - failure_start <= config.distributed_window
+        )
+        if not distributed_pattern_matches:
+            return None, "distributed_campaign_does_not_match_rule"
+        expected_kind = "password_spray"
+    else:
+        looks_like_spray = (
+            len(failed_users) >= config.spray_min_users
+            and len(failed_users) / len(failure_events)
+            >= config.spray_user_ratio
+        )
+        expected_kind = (
+            "password_spray" if looks_like_spray else "brute_force"
+        )
 
     if finding.kind != expected_kind:
         return None, "finding_kind_does_not_match_failure_pattern"

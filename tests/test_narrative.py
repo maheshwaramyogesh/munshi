@@ -160,7 +160,7 @@ class TestNarrative(unittest.TestCase):
             for attempt in range(3):
                 line_no = len(events) + 1
                 when = base + timedelta(seconds=line_no - 1)
-                user = f"user{(source_index * 3 + attempt) % 54}"
+                user = f"user{(source_index * 3 + attempt) % 28}"
 
                 events.append(Event(
                     line_no=line_no,
@@ -190,6 +190,11 @@ class TestNarrative(unittest.TestCase):
         self.assertEqual(len(distributed_findings), 1)
 
         finding = distributed_findings[0]
+        username_ratio = len(finding.users) / finding.failures
+        self.assertGreaterEqual(
+            username_ratio, Config().distributed_min_user_ratio
+        )
+        self.assertLess(username_ratio, Config().spray_user_ratio)
         narrative = build_narrative(finding, events)
 
         self.assertEqual(narrative["status"], "verified")
