@@ -189,6 +189,7 @@ Important limitations:
 
 - Detection is rule-based and depends on configured thresholds and correlation assumptions.
 - Shared or reused IP addresses can contribute to false alarms.
+- Forgotten-password retry clusters remain an open false-alarm source. Munshi does not currently suppress them with same-log login history because a prior successful authentication from an address must not make later suspicious failures from that address invisible.
 - Unusual timing, log formats, or attack strategies may evade the rules.
 - A successful authentication near a cluster of failures does not automatically prove that the same actor caused both.
 - Distributed correlation does not establish compromise or attribute an attack to a particular person.
