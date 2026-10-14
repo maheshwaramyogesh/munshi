@@ -341,6 +341,11 @@ def _detect_distributed_sprays(events: List[Event], config: Config):
         (event for event in events if not event.success),
         key=lambda event: (event.time, event.line_no),
     )
+    successes_by_ip = defaultdict(list)
+
+    for event in events:
+        if event.success:
+            successes_by_ip[event.ip].append(event)
 
     candidates = []
 
@@ -361,6 +366,15 @@ def _detect_distributed_sprays(events: List[Event], config: Config):
             if config.distributed_min_failures_per_ip
             <= count
             <= config.distributed_max_failures_per_ip
+        }
+
+        participating_ips = {
+            ip
+            for ip in participating_ips
+            if not any(
+                first_event.time <= success.time <= window_end
+                for success in successes_by_ip.get(ip, [])
+            )
         }
 
         campaign_events = [

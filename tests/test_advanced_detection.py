@@ -245,6 +245,53 @@ class TestDistributedDetection(unittest.TestCase):
 
         self.assertEqual(findings, [])
 
+    def test_distributed_campaign_excludes_ips_with_same_window_success(self):
+        events = make_distributed_spray()
+        line_no = max(event.line_no for event in events) + 1
+
+        for source_index in range(3):
+            ip = f"198.51.100.{80 + source_index}"
+            user = f"staff{source_index}"
+            start = 600 + source_index * 30
+
+            for attempt in range(3):
+                events.append(
+                    make_event(
+                        line_no,
+                        seconds=start + attempt * 8,
+                        user=user,
+                        ip=ip,
+                    )
+                )
+                line_no += 1
+
+            events.append(
+                make_event(
+                    line_no,
+                    seconds=start + 30,
+                    user=user,
+                    success=True,
+                    ip=ip,
+                )
+            )
+            line_no += 1
+
+        findings = detect(events)
+        campaigns = [
+            finding for finding in findings
+            if len(finding.source_ips) > 1
+        ]
+
+        self.assertEqual(len(campaigns), 1)
+        self.assertEqual(len(campaigns[0].source_ips), 20)
+        self.assertFalse(
+            set(campaigns[0].source_ips).intersection({
+                "198.51.100.80",
+                "198.51.100.81",
+                "198.51.100.82",
+            })
+        )
+
     def test_repeated_username_across_ips_is_not_a_spray(self):
         findings = detect(make_distributed_repeated_user())
 
