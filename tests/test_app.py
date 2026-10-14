@@ -33,11 +33,11 @@ class TestWeb(unittest.TestCase):
         self.client = create_app().test_client()
 
     def test_index_page_loads_and_has_security_headers(self):
-        r = self.client.get("/", follow_redirects=True)
-        self.assertEqual(r.status_code, 200)
-        self.assertIn(b"Munshi: SSH log analysis", r.data)
-        self.assertIn("default-src 'self'", r.headers["Content-Security-Policy"])
-        self.assertEqual(r.headers["X-Content-Type-Options"], "nosniff")
+        with self.client.get("/", follow_redirects=True) as response:
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"Munshi | SSH authentication investigation", response.data)
+            self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
+            self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
 
     def test_page_javascript_never_uses_innerhtml(self):
         # Log text is attacker-controlled. This guard catches a future XSS mistake.
@@ -50,10 +50,20 @@ class TestWeb(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
 
     def test_upload_over_size_limit_is_rejected(self):
-        big = io.BytesIO(b"x" * (2 * 1024 * 1024 + 10))
-        r = self.client.post("/api/analyze", data={"logfile": (big, "big.log")},
-                             content_type="multipart/form-data")
-        self.assertEqual(r.status_code, 413)
+        boundary = b"----MunshiOversizedUpload"
+        payload = (
+            b"--" + boundary + b"\r\n"
+            b'Content-Disposition: form-data; name="logfile"; filename="big.log"\r\n'
+            b"Content-Type: text/plain\r\n\r\n"
+            + b"x" * (2 * 1024 * 1024 + 10)
+            + b"\r\n--" + boundary + b"--\r\n"
+        )
+        with self.client.post(
+            "/api/analyze",
+            data=payload,
+            content_type=f"multipart/form-data; boundary={boundary.decode()}",
+        ) as response:
+            self.assertEqual(response.status_code, 413)
 
     def test_upload_analyzes_and_never_returns_html(self):
         line = "Oct  1 09:00:00 server01 sshd[1]: Failed password for invalid user {u} from 9.9.9.9 port 22 ssh2\n"
