@@ -1,6 +1,6 @@
-# Munshi vNext: Signal Atlas preview
+# Munshi vNext: SSH log analysis interface
 
-Isolated preview. No existing frontend, backend, test or config file was changed.
+Frontend for the Flask API in `app.py`.
 
 ## Open it
 1. `python generate_logs.py` and `python generate_logs.py --hard` (if `logs/` is missing)
@@ -22,4 +22,4 @@ With `prefers-reduced-motion`, wave animation, drift, trail, spotlight and paral
 - The hero product panel is labelled "Illustrative sample, not live data". Its IP is from the RFC 5737 documentation range.
 
 ## Status
-Not opened in a browser and not tested. Only `node --check app.js` was run.
+Interface for the Flask API. Run `python -m unittest -v` from the project root for backend/API tests, and `node --check app.js` for a JavaScript syntax check when Node.js is installed.

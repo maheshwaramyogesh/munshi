@@ -26,7 +26,7 @@ class TestWeb(unittest.TestCase):
     def test_index_page_loads_and_has_security_headers(self):
         r = self.client.get("/", follow_redirects=True)
         self.assertEqual(r.status_code, 200)
-        self.assertIn(b"Munshi: every signal, accounted for", r.data)
+        self.assertIn(b"Munshi: SSH log analysis", r.data)
         self.assertIn("default-src 'self'", r.headers["Content-Security-Policy"])
         self.assertEqual(r.headers["X-Content-Type-Options"], "nosniff")
 

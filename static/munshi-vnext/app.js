@@ -20,6 +20,16 @@ const COL = { brute_force: "var(--blue)", brute_force_success: "var(--red)", pas
 const fmt = (n) => Number(n).toLocaleString("en-US");
 const list = () => (S.data ? S.data.findings : []);
 const pct = (a, b) => (b ? `${((100 * a) / b).toFixed(1)}%` : "n/a");
+const sourceIps = (f) => Array.isArray(f.source_ips) && f.source_ips.length ? f.source_ips : [f.ip];
+const sourceFull = (f) => sourceIps(f).join(", ");
+const sourceShort = (f, n = 4) => {
+  const ips = sourceIps(f);
+  if (ips.length === 1) return ips[0];
+  const shown = ips.slice(0, n).join(", ");
+  const more = ips.length > n ? `, +${fmt(ips.length - n)} more` : "";
+  return `${fmt(ips.length)} addresses: ${shown}${more}`;
+};
+const Source = (f, n = 4) => h("span", { title: sourceFull(f) }, sourceShort(f, n));
 function auth(f) {
   const u = f.episode_success_users || [], n = f.episode_success_count ?? u.length;
   if (!n && !f.compromised) return { on: false, text: "No successful authentication observed in the window" };
@@ -55,7 +65,7 @@ const Met = (l, v, n, c) => h("div", { class: `panel met ${c || ""}` }, h("small
 const sampleBtns = (to) => h("div", { class: "chips" }, Btn("Load Easy Sample", () => run("sample", "easy", to), "pri"), Btn("Load Hard Sample", () => run("sample", "hard", to)));
 const need = (what) => h("div", { class: "empty" }, h("b", {}, "No analysis loaded"), `${what} needs a log. Load a sample or upload a file.`, sampleBtns(S.view));
 const copy = (text, btn) => { const o = btn.textContent; (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => { btn.textContent = "Copied"; }, () => { btn.textContent = "Copy unavailable"; }).finally(() => setTimeout(() => (btn.textContent = o), 1200)); };
-const summary = (f) => `${TYPE[f.label] || f.label} from ${f.ip}, ${f.start} to ${f.end}: ${f.failures} failed attempts, ${f.n_users} usernames. ${auth(f).text}. Evidence lines: ${f.evidence_total}.`;
+const summary = (f) => `${TYPE[f.label] || f.label} from ${sourceShort(f)}, ${f.start} to ${f.end}: ${f.failures} failed attempts, ${f.n_users} usernames. ${auth(f).text}. Evidence lines: ${f.evidence_total}.`;
 function PathViz(f) {
   const a = auth(f), steps = [["Failures", fmt(f.failures)], ["Rule match", f.kind === "password_spray" ? "Password spray" : "Brute force"], ["Evidence", `${fmt(f.evidence_total)} lines`], ["Authentication", a.on ? "observed" : "none observed"]];
   const svg = sv("svg", { class: "pv", viewBox: "0 0 560 76", role: "img", "aria-label": `Path: ${steps.map((t) => t.join(" ")).join(", then ")}` });
@@ -81,7 +91,7 @@ const V = {};
 V.watch = () => {
   if (!S.data) return [Head("Watch", "Summary of the loaded log."), need("The overview")];
   const m = S.data.summary, L = list(), fa = S.score ? S.score.false_alarms : null, max = Math.max(1, ...L.map((f) => f.failures));
-  const bars = h("div", { class: "bars", role: "group", "aria-label": "Failed attempts per finding in start-time order" }, L.map((f, i) => { const b = h("button", { class: `bar ${auth(f).on ? "a" : ""}`, title: `${f.ip}: ${f.failures} failures`, "aria-label": `${f.ip}, ${f.failures} failures`, onclick: () => open(f) }); b.addEventListener("mouseenter", () => say(f)); b.addEventListener("focus", () => say(f)); b.style.height = `${(100 * f.failures) / max}%`; b.style.animationDelay = `${Math.min(i * 15, 400)}ms`; return b; }));
+  const bars = h("div", { class: "bars", role: "group", "aria-label": "Failed attempts per finding in start-time order" }, L.map((f, i) => { const b = h("button", { class: `bar ${auth(f).on ? "a" : ""}`, title: `${sourceShort(f)}: ${f.failures} failures. Full source list: ${sourceFull(f)}`, "aria-label": `${sourceShort(f)}, ${f.failures} failures`, onclick: () => open(f) }); b.addEventListener("mouseenter", () => say(f)); b.addEventListener("focus", () => say(f)); b.style.height = `${(100 * f.failures) / max}%`; b.style.animationDelay = `${Math.min(i * 15, 400)}ms`; return b; }));
   const readout = h("div", { class: "bar-readout", id: "readout", "aria-live": "polite" },
     h("div", { class: "br-empty" }, h("span", { class: "br-empty-dot" }), h("span", {}, "Hover or focus a bar to inspect its finding.")));
   const say = (f) => {
@@ -93,7 +103,7 @@ V.watch = () => {
         h("div", { class: "br-identity" },
           h("span", { class: "br-overline" }, "Selected finding"),
           h("strong", { class: "br-name" }, TYPE[f.label] || f.label),
-          h("code", { class: "br-ip mono" }, f.ip)), state),
+          h("code", { class: "br-ip mono", title: sourceFull(f) }, sourceShort(f))), state),
       h("div", { class: "br-metrics" }, facts.map(([label, value]) => h("div", { class: "br-metric" }, h("span", {}, label), h("b", {}, value)))),
       h("div", { class: "br-foot" }, h("span", { class: "mono br-window" }, `${f.start}  →  ${f.end}`), h("span", { class: "br-auth" }, a.text))
     );
@@ -107,7 +117,7 @@ V.watch = () => {
       Met("Authentication observed", fmt(L.filter((f) => auth(f).on).length), "findings with a success in window", "jade"), Met("False alarms", fa == null ? "n/a" : fa, fa == null ? "known for built-in samples only" : "per the answer key")),
     h("div", { class: "g2" }, h("div", { class: "panel" }, h("h3", {}, "Failed attempts per finding, in start-time order (red: authentication observed)"), L.length ? [bars, dots, readout] : "No findings."),
       h("div", { class: "panel" }, h("h3", {}, "Findings by type"), L.length ? Donut(L) : "No findings.")),
-    h("div", { class: "panel" }, h("h3", {}, "Most recent findings by start time"), h("ul", { class: "stream" }, recent.map((f) => h("li", {}, h("button", { onclick: () => open(f), onmouseenter: () => lit(f, true), onmouseleave: () => lit(f, false), onfocus: () => lit(f, true), onblur: () => lit(f, false) }, h("b", {}, TYPE[f.label] || f.label), h("small", { class: "mono" }, `${f.ip} · ${f.start} · ${fmt(f.failures)} failures`))))))];
+    h("div", { class: "panel" }, h("h3", {}, "Most recent findings by start time"), h("ul", { class: "stream" }, recent.map((f) => h("li", {}, h("button", { onclick: () => open(f), onmouseenter: () => lit(f, true), onmouseleave: () => lit(f, false), onfocus: () => lit(f, true), onblur: () => lit(f, false), title: sourceFull(f) }, h("b", {}, TYPE[f.label] || f.label), h("small", { class: "mono" }, `${sourceShort(f)} · ${f.start} · ${fmt(f.failures)} failures`))))))];
 };
 V.analyze = () => {
   const inp = h("input", { type: "file", accept: ".log,.txt", hidden: true, "aria-label": "Choose log file" });
@@ -126,18 +136,18 @@ V.analyze = () => {
 V.findings = () => {
   if (!S.data) return [Head("Findings", "Rule matches in the loaded log."), need("The findings queue")];
   const L = list(), kinds = [...new Set(L.map((f) => f.label))], q = S.q.toLowerCase();
-  let shown = L.filter((f) => (S.filter === "all" || (S.filter === "auth" ? auth(f).on : f.label === S.filter)) && (!q || f.ip.includes(q) || f.users.some((u) => u.toLowerCase().includes(q)) || (TYPE[f.label] || "").toLowerCase().includes(q)));
+  let shown = L.filter((f) => (S.filter === "all" || (S.filter === "auth" ? auth(f).on : f.label === S.filter)) && (!q || sourceIps(f).some((ip) => ip.includes(q)) || f.users.some((u) => u.toLowerCase().includes(q)) || (TYPE[f.label] || "").toLowerCase().includes(q)));
   shown = shown.sort((a, b) => S.sort === "failures" ? b.failures - a.failures : a.start.localeCompare(b.start));
   const chip = (k, n, c) => h("button", { class: `chip ${S.filter === k ? "on" : ""}`, "aria-pressed": S.filter === k, onclick: () => { S.filter = k; render(); } }, `${n} (${c})`);
   const search = h("input", { class: "in-s", type: "search", placeholder: "Search IP, username, type", "aria-label": "Search findings", value: S.q });
   search.addEventListener("input", () => { S.q = search.value; const p = search.selectionStart; render(); const n = $("#view .in-s"); n.focus(); n.setSelectionRange(p, p); });
   const sort = h("select", { class: "in-s", "aria-label": "Sort", onchange: (e) => { S.sort = e.target.value; render(); } }, h("option", { value: "start", selected: S.sort === "start" }, "Sort: start time"), h("option", { value: "failures", selected: S.sort === "failures" }, "Sort: most failures"));
-  const pvp = h("div", { class: "panel pvp" }), showPath = (f) => pvp.replaceChildren(h("h3", {}, `Signal path: ${f.ip}, ${TYPE[f.label] || f.label}`), PathViz(f));
+  const pvp = h("div", { class: "panel pvp" }), showPath = (f) => pvp.replaceChildren(h("h3", {}, `Signal path: ${sourceShort(f)}, ${TYPE[f.label] || f.label}`), PathViz(f));
   if (shown[0]) showPath(shown[0]);
-  const tr = (f) => { const a = auth(f), r = h("tr", { tabindex: 0, class: S.sel === f ? "sel" : "", onclick: () => open(f) }, h("td", {}, h("b", {}, TYPE[f.label] || f.label)), h("td", { class: "mono" }, f.ip), h("td", { class: "mono" }, f.start), h("td", {}, fmt(f.failures)), h("td", {}, f.n_users), h("td", {}, h("span", { class: `st ${a.on ? "j" : ""}` }, a.on ? (a.text.includes("ambiguous") ? "Observed, ambiguous" : "Authentication observed") : "Failures only")));
+  const tr = (f) => { const a = auth(f), r = h("tr", { tabindex: 0, class: S.sel === f ? "sel" : "", onclick: () => open(f) }, h("td", {}, h("b", {}, TYPE[f.label] || f.label)), h("td", { class: "mono" }, Source(f)), h("td", { class: "mono" }, f.start), h("td", {}, fmt(f.failures)), h("td", {}, f.n_users), h("td", {}, h("span", { class: `st ${a.on ? "j" : ""}` }, a.on ? (a.text.includes("ambiguous") ? "Observed, ambiguous" : "Authentication observed") : "Failures only")));
     r.addEventListener("keydown", (e) => e.key === "Enter" && open(f)); r.addEventListener("mouseenter", () => showPath(f)); r.addEventListener("focus", () => showPath(f)); return r; };
   return [Head("Findings", "Rule matches only. No severity score exists, and an IP address is not a person."), h("div", { class: "chips" }, search, sort), h("div", { class: "chips" }, chip("all", "All", L.length), kinds.map((k) => chip(k, TYPE[k] || k, L.filter((f) => f.label === k).length)), chip("auth", "Authentication observed", L.filter((f) => auth(f).on).length)),
-    shown.length ? [pvp, h("div", { class: "panel" }, h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, ["Rule", "Source IP", "First failure", "Failures", "Usernames", "Authentication"].map((c) => h("th", {}, c)))), h("tbody", {}, shown.map(tr))))] : h("div", { class: "empty" }, h("b", {}, "No findings match"), "Clear the search or pick another filter.")];
+    shown.length ? [pvp, h("div", { class: "panel" }, h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, ["Rule", "Source", "First failure", "Failures", "Usernames", "Authentication"].map((c) => h("th", {}, c)))), h("tbody", {}, shown.map(tr))))] : h("div", { class: "empty" }, h("b", {}, "No findings match"), "Clear the search or pick another filter.")];
 };
 function pickLine(n) {
   S.line = n;
@@ -381,7 +391,7 @@ V.investigate = () => {
   return [
     Head(
       `${TYPE[f.label] || f.label}`,
-      `Source ${f.ip}. A rule match, not proof of intent or identity.`
+      `Source ${sourceShort(f)}. A rule match, not proof of intent or identity.`
     ),
 
     h("div", { class: "panel pvp" }, PathViz(f)),
@@ -401,7 +411,7 @@ V.investigate = () => {
           h(
             "dl",
             { class: "f" },
-            row("Source IP", f.ip, "mono"),
+            row("Source", h("span", { title: sourceFull(f) }, sourceShort(f)), "mono"),
             row("First failure", f.start, "mono"),
             row("Last", f.end, "mono"),
             row("Failures", fmt(f.failures)),
@@ -448,7 +458,7 @@ V.chronicle = () => {
   if (!list().length) return [Head("Chronicle", "What was observed, and in what order?"), S.data ? h("div", { class: "empty" }, h("b", {}, "No findings to order")) : need("The chronicle")];
   const L = [...list()].sort((x, y) => x.start.localeCompare(y.start));
   return [Head("Chronicle", "Findings in time order. Recorded facts only; no narrative or interpretation is generated."),
-    h("div", { class: "panel" }, h("ul", { class: "tl" }, L.map((f) => { const first = f.evidence_preview[0]; return h("li", { class: auth(f).on ? "a" : "" }, h("div", { class: "mono" }, `${f.start} to ${f.end}`), h("b", {}, TYPE[f.label] || f.label), h("div", { class: "sub" }, `${f.ip} · ${fmt(f.failures)} failures · ${f.n_users} usernames · ${auth(f).text}`), h("div", { class: "chips" }, first ? Btn(`Evidence from line ${first.line}`, () => open(f, first.line)) : null)); }))),
+    h("div", { class: "panel" }, h("ul", { class: "tl" }, L.map((f) => { const first = f.evidence_preview[0]; return h("li", { class: auth(f).on ? "a" : "" }, h("div", { class: "mono" }, `${f.start} to ${f.end}`), h("b", {}, TYPE[f.label] || f.label), h("div", { class: "sub" }, h("span", { title: sourceFull(f) }, sourceShort(f)), ` · ${fmt(f.failures)} failures · ${f.n_users} usernames · ${auth(f).text}`), h("div", { class: "chips" }, first ? Btn(`Evidence from line ${first.line}`, () => open(f, first.line)) : null)); }))),
     h("p", { class: "note" }, "Interpretation (intent, identity, compromise) is not made here. Investigation explains why a rule matched; Chronicle only orders what was recorded.")];
 };
 V.evaluation = () => {
@@ -466,15 +476,15 @@ V.reports = () => {
   if (!S.data) return [Head("Reports", "Export the loaded analysis."), need("A report")];
   const save = (n, t, x) => { const u = URL.createObjectURL(new Blob([x], { type: t })); const l = h("a", { href: u, download: n }); document.body.append(l); l.click(); l.remove(); URL.revokeObjectURL(u); };
   const q = (x) => `"${String(x).replace(/"/g, '""')}"`, m = S.data.summary, sc = S.score, L = [...list()].sort((a, b) => a.start.localeCompare(b.start));
-  const csv = () => ["type,source_ip,start,end,failures,usernames,authentication_observed,evidence_lines"].concat(list().map((f) => [f.label, f.ip, f.start, f.end, f.failures, f.n_users, auth(f).on, f.evidence_total].map(q).join(","))).join("\n");
+  const csv = () => ["type,n_source_ips,source_ips,representative_source_ip,start,end,failures,usernames,authentication_observed,evidence_lines"].concat(list().map((f) => [f.label, sourceIps(f).length, sourceIps(f).join(";"), f.ip, f.start, f.end, f.failures, f.n_users, auth(f).on, f.evidence_total].map(q).join(","))).join("\n");
   return [Head("Reports", "JSON and CSV download, and Print (choose “Save as PDF” in the print dialog). The page below is the report."),
     h("div", { class: "chips noprint" }, Btn("Download JSON", () => save("munshi_report.json", "application/json", JSON.stringify({ dataset: S.ds, summary: m, findings: list(), score: sc }, null, 2)), "pri"), Btn("Download CSV", () => save("munshi_findings.csv", "text/csv", csv())), Btn("Print", () => window.print())),
     h("div", { class: "paper print-ok" }, h("h2", {}, "Munshi analysis report"), h("p", { class: "mono" }, `Dataset: ${S.ds.name}`),
       h("h3", {}, "1. Analysis summary"), h("p", {}, `${fmt(m.events)} events read, ${fmt(m.skipped)} lines skipped, ${m.findings} rule matches.`),
-      h("h3", {}, "2. Detection findings and evidence references"), h("table", {}, h("thead", {}, h("tr", {}, ["Rule", "Source", "Failures", "Evidence lines (shown)"].map((c) => h("th", {}, c)))), h("tbody", {}, L.slice(0, 20).map((f) => h("tr", {}, h("td", {}, TYPE[f.label] || f.label), h("td", { class: "mono" }, f.ip), h("td", {}, fmt(f.failures)), h("td", { class: "mono" }, f.evidence_preview.length ? `${f.evidence_preview[0].line} to ${f.evidence_preview[f.evidence_preview.length - 1].line} of ${fmt(f.evidence_total)}` : "none"))))), L.length > 20 ? h("p", {}, `…${L.length - 20} more in the exports.`) : null,
-      h("h3", {}, "3. Chronological sequence"), h("ul", {}, L.slice(0, 20).map((f) => h("li", { class: "mono" }, `${f.start}  ${f.label}  ${f.ip}`))),
+      h("h3", {}, "2. Detection findings and evidence references"), h("table", {}, h("thead", {}, h("tr", {}, ["Rule", "Source", "Failures", "Evidence lines (shown)"].map((c) => h("th", {}, c)))), h("tbody", {}, L.slice(0, 20).map((f) => h("tr", {}, h("td", {}, TYPE[f.label] || f.label), h("td", { class: "mono", title: sourceFull(f) }, sourceShort(f)), h("td", {}, fmt(f.failures)), h("td", { class: "mono" }, f.evidence_preview.length ? `${fmt(f.evidence_preview.length)} of ${fmt(f.evidence_total)} lines shown` : "none"))))), L.length > 20 ? h("p", {}, `…${L.length - 20} more in the exports.`) : null,
+      h("h3", {}, "3. Chronological sequence"), h("ul", {}, L.slice(0, 20).map((f) => h("li", { class: "mono", title: sourceFull(f) }, `${f.start}  ${TYPE[f.label] || f.label}  ${sourceShort(f)}`))),
       sc ? [h("h3", {}, "4. Evaluation (synthetic data)"), h("p", {}, `${sc.detected} of ${sc.planted} planted attacks detected; ${sc.planted - sc.detected} missed; ${sc.false_alarms} false alarms.`)] : null,
-      h("h3", {}, "Limitations"), h("p", {}, "Rule-based and per-IP. Distributed or slow attacks can be missed; shared IPs can cause false alarms. An IP address is not a person. Synthetic results do not describe real-world performance."))];
+      h("h3", {}, "Limitations"), h("p", {}, "Rule-based detection with per-IP rules plus one cross-address rule. Thresholds are fixed and narrow, so activity just outside them can be missed. Shared addresses and forgotten-password retries can cause false alarms. An address is not a person. Results on synthetic data do not describe real-world performance."))];
 };
 function go(v) { S.view = v; render(); }
 function render() {
@@ -494,7 +504,7 @@ let palSel = 0, palItems = [];
 function palRender() {
   const q = $("#pal-in").value.toLowerCase().trim();
   palItems = NAV.filter(([, n]) => n.toLowerCase().includes(q)).map(([k, n]) => ({ t: `Go to ${n}`, s: "screen", fn: () => go(k) }));
-  if (q) list().filter((f) => f.ip.includes(q) || f.users.some((u) => u.toLowerCase().includes(q)) || (TYPE[f.label] || "").toLowerCase().includes(q)).slice(0, 8).forEach((f) => palItems.push({ t: `${TYPE[f.label] || f.label}`, s: `${f.ip} · ${f.start}`, fn: () => open(f) }));
+  if (q) list().filter((f) => sourceIps(f).some((ip) => ip.includes(q)) || f.users.some((u) => u.toLowerCase().includes(q)) || (TYPE[f.label] || "").toLowerCase().includes(q)).slice(0, 8).forEach((f) => palItems.push({ t: `${TYPE[f.label] || f.label}`, s: `${sourceShort(f)} · ${f.start}`, fn: () => open(f) }));
   palSel = Math.min(palSel, Math.max(palItems.length - 1, 0));
   $("#pal-list").replaceChildren(...(palItems.length ? palItems.map((it, i) => h("li", { role: "option", "aria-selected": i === palSel ? "true" : "false", onclick: () => palGo(i) }, h("span", {}, it.t), h("small", {}, it.s))) : [h("li", {}, "No match")]));
 }
