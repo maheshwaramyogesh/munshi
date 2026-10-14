@@ -18,6 +18,15 @@ HAVE_DATA = all((ROOT / "logs" / n).exists() for n in
                  "ground_truth_hard.json", "benign_hard.json"))
 
 
+class TestStaticSafety(unittest.TestCase):
+    def test_vnext_javascript_never_uses_innerhtml(self):
+        js = (ROOT / "static" / "munshi-vnext" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        code = "\n".join(l for l in js.splitlines() if not l.strip().startswith("//"))
+        self.assertNotIn("innerHTML", code)
+
+
 @unittest.skipIf(create_app is None, "Flask not installed (pip install flask)")
 class TestWeb(unittest.TestCase):
     def setUp(self):
@@ -57,11 +66,46 @@ class TestWeb(unittest.TestCase):
         self.assertEqual(r.get_json()["summary"]["findings"], 1)
         self.assertIn(evil, r.get_json()["findings"][0]["users"])   # kept as plain data
 
+    def test_empty_upload_returns_zero_findings(self):
+        r = self.client.post(
+            "/api/analyze",
+            data={"logfile": (io.BytesIO(b""), "empty.log")},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(r.status_code, 200)
+        data = r.get_json()
+        self.assertEqual(data["summary"]["events"], 0)
+        self.assertEqual(data["summary"]["skipped"], 0)
+        self.assertEqual(data["summary"]["findings"], 0)
+        self.assertEqual(data["findings"], [])
+
+    def test_unreadable_text_upload_returns_skipped_count(self):
+        r = self.client.post(
+            "/api/analyze",
+            data={
+                "logfile": (
+                    io.BytesIO(b"\xff\xfe\x00not an auth log\n\x00\x01still not ssh\n"),
+                    "binary.log",
+                )
+            },
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(r.status_code, 200)
+        data = r.get_json()
+        self.assertEqual(data["summary"]["events"], 0)
+        self.assertEqual(data["summary"]["skipped"], 2)
+        self.assertEqual(data["summary"]["findings"], 0)
+        self.assertEqual(data["findings"], [])
+
     def test_distributed_campaign_fields_are_exposed_by_api(self):
         lines = []
+        expected_ips = []
 
         for source_index in range(20):
             ip = f"203.0.113.{50 + source_index}"
+            expected_ips.append(ip)
 
             for attempt in range(3):
                 event_index = len(lines)
@@ -101,6 +145,7 @@ class TestWeb(unittest.TestCase):
 
         # All participating IPs and failures must reach the API response.
         self.assertEqual(campaign["n_source_ips"], 20)
+        self.assertEqual(campaign["source_ips"], expected_ips)
         self.assertEqual(len(campaign["source_ips"]), 20)
         self.assertEqual(campaign["failures"], 60)
 
