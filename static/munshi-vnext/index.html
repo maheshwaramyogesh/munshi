@@ -11,8 +11,7 @@
 <a class="skip" href="#main">Skip to content</a>
 <div id="site">
 <header class="s-head"><a class="brand" href="#top"><img src="assets/munshi-mark.svg" alt="" width="32" height="32"><span>Munshi</span></a>
- <nav aria-label="Sections"><a href="#story">Workflow</a><a href="#c3">Evidence</a><a href="#c4">Evaluation</a></nav>
- <button class="btn solid" data-open="analyze">Launch Munshi <i aria-hidden="true">&#8599;</i></button></header>
+ <nav aria-label="Sections"><a href="#story">Workflow</a><a href="#c3">Evidence</a><a href="#c4">Evaluation</a></nav></header>
 <main id="main">
 <section class="hero" id="top" aria-labelledby="h1">
  <div class="stage"><div class="sky"></div>
@@ -44,16 +43,17 @@
  <article class="chap rv" id="c4"><h3>Evaluate</h3><div><p>The rules are scored against synthetic logs with planted attacks, including misses and false alarms. These results do not describe performance on real systems.</p><button class="btn ghost" data-open="evaluation">Open Evaluation</button></div></article>
  <article class="chap rv" id="c5"><h3>Chronicle</h3><div><p>Findings laid out in time order using only returned timestamps and counts. Observation and interpretation stay separate.</p></div></article>
 </section>
-<section class="final rv"><h2>Open the workspace.</h2><button class="btn solid" data-open="analyze">Launch Munshi <i aria-hidden="true">&#8599;</i></button></section>
+<section class="final rv"><h2>Open the workspace.</h2><p>Use the Launch Munshi button above to enter the workspace.</p></section>
 </main>
 <footer class="s-foot"><span>Munshi · SSH log investigation</span><span>Local analysis · Evidence-linked findings</span></footer>
 </div>
 <div id="app" hidden>
- <aside class="side"><button class="brand" data-home aria-label="Munshi home"><img src="assets/munshi-mark.svg" alt="" width="28" height="28"><span>Munshi</span></button><nav id="nav" aria-label="Workspace"></nav><button class="kbd-hint" id="pal-open"><span>Search</span><kbd>Ctrl K</kbd></button><p class="side-note">Replay of loaded logs.<br>Not a live feed.</p></aside>
+ <aside class="side"><button class="brand" data-home aria-label="Munshi home"><img src="assets/munshi-mark.svg" alt="" width="28" height="28"><span>Munshi</span></button><nav id="nav" aria-label="Workspace"></nav><button class="kbd-hint" id="pal-open"><span>Search</span><kbd>Ctrl K</kbd></button><button class="guide-open" id="guide-open" type="button" aria-label="How to use Munshi"><span aria-hidden="true">?</span><span>How to use Munshi</span></button><p class="side-note">Replay of loaded logs.<br>Not a live feed.</p></aside>
  <section class="work"><header class="top"><h1 id="crumb"></h1><span id="dataset" class="pill"></span></header><div id="view" class="view" tabindex="-1"></div></section>
 </div>
 <div id="gateway" hidden aria-hidden="true"><div class="gateway-panel gateway-panel-left"></div><div class="gateway-panel gateway-panel-right"></div><div class="gateway-mark"><span>MUNSHI</span><span>AWAITS</span></div><div class="gateway-line" aria-hidden="true"></div><div class="gateway-label">SECURE WORKSPACE</div></div>
 <div id="pal" class="pal" hidden role="dialog" aria-modal="true" aria-label="Command palette"><div class="pal-box"><input id="pal-in" type="text" placeholder="Go to a screen or search loaded findings" aria-label="Search" autocomplete="off"><ul id="pal-list" role="listbox"></ul></div></div>
+<div id="guide" class="guide" hidden role="dialog" aria-modal="true" aria-labelledby="guide-title" aria-describedby="guide-copy"><div class="guide-box"><div class="guide-top"><span class="guide-kicker">A simple tour</span><button class="guide-close" id="guide-close" type="button" aria-label="Close guide">&#215;</button></div><div class="guide-progress" aria-hidden="true"><span id="guide-progress"></span></div><p class="guide-count" id="guide-count"></p><h2 id="guide-title"></h2><p id="guide-copy"></p><div class="guide-example" id="guide-example"></div><div class="guide-actions"><button class="app-btn" id="guide-back" type="button">Back</button><button class="app-btn pri" id="guide-next" type="button">Next</button></div></div></div>
 <p id="live" class="sr" role="status" aria-live="polite"></p>
 <script src="app.js"></script>
 </body></html>

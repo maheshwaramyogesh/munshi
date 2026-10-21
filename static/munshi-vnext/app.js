@@ -562,7 +562,41 @@ $("#pal-in").addEventListener("keydown", (e) => {
 });
 $("#pal").addEventListener("click", (e) => e.target.id === "pal" && palClose());
 $("#pal-open").addEventListener("click", palOpen);
-document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#pal").hidden ? palOpen() : palClose(); } else if (e.key === "Escape" && !$("#pal").hidden) palClose(); });
+const GUIDE = [
+  ["Start with a log", "Munshi needs an SSH authentication log to investigate. Choose a file from your computer, or use Easy Sample to see a safe example without preparing anything.", "Look for the Analyze screen. Your file is processed in memory and is not stored by Munshi."],
+  ["Let Munshi read it", "Munshi reads the authentication events, looks for repeated login failures, and checks whether an authentication was observed.", "The short Receive, Parse, Detect, and Link sequence is the analysis in progress. You do not need to wait for or understand each stage."],
+  ["Read the overview", "Watch gives you the big picture: how many events were read, how many patterns were found, and when the activity happened.", "Start here when you want a quick answer. Nothing is labelled a finding unless Munshi can connect it to log evidence."],
+  ["Open a finding", "Findings turns a suspicious pattern into a plain-language explanation. You can see the source addresses, usernames, failed attempts, time window, and authentication outcome.", "An authentication being observed is reported as evidence—not as proof of who was behind an address or what happened next."],
+  ["Check the evidence", "Investigate lets you follow the explanation back to the exact lines in the original log. Select a line to see the event that supports the finding.", "This is the most important habit: use the summary for speed, then use the evidence view to verify what Munshi saw."]
+];
+let guideStep = 0, guideReturnFocus = null;
+function guideRender() {
+  const [title, copyText, example] = GUIDE[guideStep];
+  $("#guide-count").textContent = `Step ${guideStep + 1} of ${GUIDE.length}`;
+  $("#guide-title").textContent = title;
+  $("#guide-copy").textContent = copyText;
+  $("#guide-example").textContent = example;
+  $("#guide-progress").style.width = `${((guideStep + 1) / GUIDE.length) * 100}%`;
+  $("#guide-back").disabled = guideStep === 0;
+  $("#guide-next").textContent = guideStep === GUIDE.length - 1 ? "Done" : "Next";
+}
+function guideOpen() {
+  guideReturnFocus = document.activeElement;
+  guideStep = 0;
+  $("#guide").hidden = false;
+  guideRender();
+  $("#guide-next").focus();
+}
+function guideClose() {
+  $("#guide").hidden = true;
+  if (guideReturnFocus && typeof guideReturnFocus.focus === "function") guideReturnFocus.focus();
+}
+$("#guide-open").addEventListener("click", guideOpen);
+$("#guide-close").addEventListener("click", guideClose);
+$("#guide-back").addEventListener("click", () => { guideStep = Math.max(guideStep - 1, 0); guideRender(); });
+$("#guide-next").addEventListener("click", () => { if (guideStep === GUIDE.length - 1) guideClose(); else { guideStep += 1; guideRender(); } });
+$("#guide").addEventListener("click", (e) => e.target.id === "guide" && guideClose());
+document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#pal").hidden ? palOpen() : palClose(); } else if (e.key === "Escape") { if (!$("#guide").hidden) guideClose(); else if (!$("#pal").hidden) palClose(); } });
 function enter(view) { $("#site").hidden = true; $("#app").hidden = false; document.body.className = "is-app"; S.view = view; render(); $("#view").focus(); }
 function home() { $("#app").hidden = true; $("#gateway").hidden = true; $("#site").hidden = false; document.body.className = "is-site"; window.scrollTo(0, 0); }
 let leaving = false;
