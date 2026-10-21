@@ -95,6 +95,23 @@ The deployment build generates the built-in easy and hard sample datasets, and
 the service uses Gunicorn with the port supplied by Render. Uploaded logs are
 processed in memory and are not saved by the app.
 
+### Protect the hosted demo
+
+HTTP Basic Authentication is disabled by default, preserving the local
+development behavior. To protect a public Render deployment, open the service
+in Render, go to **Environment > Environment Variables**, and add:
+
+```text
+MUNSHI_AUTH_REQUIRED=true
+MUNSHI_AUTH_USERNAME=<your-demo-username>
+MUNSHI_AUTH_PASSWORD=<your-demo-password>
+```
+
+The app refuses to start when authentication is enabled without both
+credentials. `/healthz` remains unauthenticated so Render can check service
+health; the homepage, frontend assets, APIs, and log uploads require the
+configured credentials. Use HTTPS and never commit real credentials to Git.
+
 ## Detection approach
 
 Munshi combines multiple rule-based strategies:

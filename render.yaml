@@ -4,4 +4,4 @@ services:
     runtime: python
     buildCommand: "pip install -r requirements.txt && python generate_logs.py && python generate_logs.py --hard"
     startCommand: gunicorn --bind 0.0.0.0:$PORT "app:create_app()"
-    healthCheckPath: /
+    healthCheckPath: /healthz

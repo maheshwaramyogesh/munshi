@@ -3,9 +3,12 @@ Tests for the web backend. Run from the project root:  python -m unittest -v
 Needs:  pip install flask   and the generated logs (easy and hard).
 """
 import io
+import os
+import base64
 import unittest
 from collections import Counter
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from app import create_app
@@ -38,6 +41,142 @@ class TestWeb(unittest.TestCase):
             self.assertIn(b"Munshi | SSH authentication investigation", response.data)
             self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
             self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+
+    def test_authentication_disabled_preserves_public_routes(self):
+        with patch.dict(os.environ, {}, clear=False):
+            for name in (
+                "MUNSHI_AUTH_REQUIRED",
+                "MUNSHI_AUTH_USERNAME",
+                "MUNSHI_AUTH_PASSWORD",
+            ):
+                os.environ.pop(name, None)
+            client = create_app().test_client()
+
+        self.assertEqual(client.get("/healthz").status_code, 200)
+        self.assertEqual(client.get("/").status_code, 302)
+        self.assertEqual(
+            client.post("/api/analyze", json={"sample": "missing"}).status_code,
+            400,
+        )
+
+    def test_required_auth_rejects_requests_without_credentials(self):
+        with patch.dict(
+            os.environ,
+            {
+                "MUNSHI_AUTH_REQUIRED": "true",
+                "MUNSHI_AUTH_USERNAME": "demo",
+                "MUNSHI_AUTH_PASSWORD": "secret",
+            },
+            clear=False,
+        ):
+            client = create_app().test_client()
+
+        response = client.get("/")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.headers["WWW-Authenticate"], 'Basic realm="Munshi"')
+        self.assertEqual(client.get("/static/munshi-vnext/index.html").status_code, 401)
+        self.assertEqual(
+            client.post("/api/analyze", json={"sample": "easy"}).status_code,
+            401,
+        )
+
+    def test_required_auth_rejects_incorrect_credentials(self):
+        with patch.dict(
+            os.environ,
+            {
+                "MUNSHI_AUTH_REQUIRED": "true",
+                "MUNSHI_AUTH_USERNAME": "demo",
+                "MUNSHI_AUTH_PASSWORD": "secret",
+            },
+            clear=False,
+        ):
+            client = create_app().test_client()
+
+        response = client.get("/", headers={"Authorization": "Basic ZGVtbzp3cm9uZw=="})
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("WWW-Authenticate", response.headers)
+
+    def test_required_auth_supports_unicode_credentials(self):
+        username = "安全-user"
+        password = "päss-🔐"
+        correct_auth = base64.b64encode(
+            f"{username}:{password}".encode("utf-8")
+        ).decode("ascii")
+        incorrect_auth = base64.b64encode(
+            f"{username}:wrong-🔐".encode("utf-8")
+        ).decode("ascii")
+        with patch.dict(
+            os.environ,
+            {
+                "MUNSHI_AUTH_REQUIRED": "true",
+                "MUNSHI_AUTH_USERNAME": username,
+                "MUNSHI_AUTH_PASSWORD": password,
+            },
+            clear=False,
+        ):
+            client = create_app().test_client()
+            authenticated = client.get(
+                "/",
+                headers={"Authorization": f"Basic {correct_auth}"},
+            )
+            rejected = client.get(
+                "/",
+                headers={"Authorization": f"Basic {incorrect_auth}"},
+            )
+
+        self.assertEqual(authenticated.status_code, 302)
+        self.assertEqual(rejected.status_code, 401)
+        self.assertIn("WWW-Authenticate", rejected.headers)
+
+    def test_required_auth_accepts_correct_credentials_and_uploads(self):
+        auth = base64.b64encode(b"demo:secret").decode("ascii")
+        with patch.dict(
+            os.environ,
+            {
+                "MUNSHI_AUTH_REQUIRED": "true",
+                "MUNSHI_AUTH_USERNAME": "demo",
+                "MUNSHI_AUTH_PASSWORD": "secret",
+            },
+            clear=False,
+        ):
+            client = create_app().test_client()
+            response = client.get("/", headers={"Authorization": f"Basic {auth}"})
+            upload = client.post(
+                "/api/analyze",
+                data={"logfile": (io.BytesIO(b""), "empty.log")},
+                content_type="multipart/form-data",
+                headers={"Authorization": f"Basic {auth}"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(upload.status_code, 200)
+
+    def test_health_check_does_not_require_authentication(self):
+        with patch.dict(
+            os.environ,
+            {
+                "MUNSHI_AUTH_REQUIRED": "true",
+                "MUNSHI_AUTH_USERNAME": "demo",
+                "MUNSHI_AUTH_PASSWORD": "secret",
+            },
+            clear=False,
+        ):
+            client = create_app().test_client()
+
+        response = client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"status": "ok"})
+
+    def test_required_auth_configuration_must_include_both_credentials(self):
+        with patch.dict(
+            os.environ,
+            {"MUNSHI_AUTH_REQUIRED": "true"},
+            clear=False,
+        ):
+            os.environ.pop("MUNSHI_AUTH_USERNAME", None)
+            os.environ.pop("MUNSHI_AUTH_PASSWORD", None)
+            with self.assertRaisesRegex(RuntimeError, "requires non-empty"):
+                create_app()
 
     def test_page_javascript_never_uses_innerhtml(self):
         # Log text is attacker-controlled. This guard catches a future XSS mistake.
@@ -206,6 +345,34 @@ class TestWeb(unittest.TestCase):
         hard = self.client.get("/api/score?set=hard").get_json()
         self.assertEqual((easy["detected"], easy["planted"], easy["false_alarms"]), (10, 10, 0))
         self.assertEqual((hard["detected"], hard["planted"], hard["false_alarms"]), (16, 16, 2))
+
+    @unittest.skipUnless(HAVE_DATA, "run generate_logs.py and generate_logs.py --hard first")
+    def test_scoreboard_requires_authentication_when_enabled(self):
+        auth = base64.b64encode(b"score-user:score-password").decode("ascii")
+        with patch.dict(
+            os.environ,
+            {
+                "MUNSHI_AUTH_REQUIRED": "true",
+                "MUNSHI_AUTH_USERNAME": "score-user",
+                "MUNSHI_AUTH_PASSWORD": "score-password",
+            },
+            clear=False,
+        ):
+            client = create_app().test_client()
+            unauthenticated = client.get("/api/score?set=easy")
+            authenticated = client.get(
+                "/api/score?set=easy",
+                headers={"Authorization": f"Basic {auth}"},
+            )
+
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertIn("WWW-Authenticate", unauthenticated.headers)
+        self.assertEqual(authenticated.status_code, 200)
+        scoring = authenticated.get_json()
+        self.assertEqual(
+            (scoring["detected"], scoring["planted"], scoring["false_alarms"]),
+            (10, 10, 0),
+        )
 
 
 if __name__ == "__main__":

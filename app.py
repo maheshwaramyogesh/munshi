@@ -21,6 +21,8 @@ Production:   gunicorn --bind 0.0.0.0:$PORT "app:create_app()"
 
 import io
 import json
+import os
+import secrets
 from pathlib import Path
 
 from flask import Flask, jsonify, redirect, request, send_from_directory
@@ -40,6 +42,29 @@ SAMPLES = {
 }
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024     # 2 MB is plenty for this project
 EVIDENCE_PREVIEW = 25                  # max evidence lines sent per finding
+AUTH_REALM = "Munshi"
+
+
+def _auth_configuration():
+    """Read and validate optional HTTP Basic Authentication settings."""
+    required = os.environ.get("MUNSHI_AUTH_REQUIRED", "").strip().lower() == "true"
+    username = os.environ.get("MUNSHI_AUTH_USERNAME", "")
+    password = os.environ.get("MUNSHI_AUTH_PASSWORD", "")
+
+    if required and (not username or not password):
+        raise RuntimeError(
+            "MUNSHI_AUTH_REQUIRED=true requires non-empty "
+            "MUNSHI_AUTH_USERNAME and MUNSHI_AUTH_PASSWORD."
+        )
+
+    return required, username, password
+
+
+def _authentication_challenge():
+    response = jsonify(error="Authentication required")
+    response.status_code = 401
+    response.headers["WWW-Authenticate"] = f'Basic realm="{AUTH_REALM}"'
+    return response
 
 
 def finding_to_dict(f, raw_by_line):
@@ -111,6 +136,30 @@ def analyze(parsed):
 def create_app():
     app = Flask(__name__, static_folder=str(ROOT / "static"), static_url_path="/static")
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+    auth_required, auth_username, auth_password = _auth_configuration()
+
+    @app.before_request
+    def require_authentication():
+        if request.path == "/healthz" or not auth_required:
+            return None
+
+        credentials = request.authorization
+        if (
+            credentials is None
+            or credentials.type.lower() != "basic"
+            or credentials.username is None
+            or credentials.password is None
+            or not secrets.compare_digest(
+                credentials.username.encode("utf-8"),
+                auth_username.encode("utf-8"),
+            )
+            or not secrets.compare_digest(
+                credentials.password.encode("utf-8"),
+                auth_password.encode("utf-8"),
+            )
+        ):
+            return _authentication_challenge()
+        return None
 
     @app.after_request
     def security_headers(resp):
@@ -123,6 +172,10 @@ def create_app():
     @app.get("/")
     def index():
         return redirect("/static/munshi-vnext/index.html")
+
+    @app.get("/healthz")
+    def healthz():
+        return jsonify(status="ok")
 
     @app.post("/api/analyze")
     def api_analyze():
