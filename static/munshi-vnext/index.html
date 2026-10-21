@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#060810">
-<title>Munshi: every signal, accounted for</title>
+<title>Munshi | SSH authentication investigation</title>
 <link rel="icon" href="assets/munshi-mark.svg" type="image/svg+xml">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -11,8 +11,7 @@
 <a class="skip" href="#main">Skip to content</a>
 <div id="site">
 <header class="s-head"><a class="brand" href="#top"><img src="assets/munshi-mark.svg" alt="" width="32" height="32"><span>Munshi</span></a>
- <nav aria-label="Sections"><a href="#story">Workflow</a><a href="#c3">Evidence</a><a href="#c4">Evaluation</a></nav>
- <button class="btn solid" data-open="analyze">Launch Munshi <i aria-hidden="true">&#8599;</i></button></header>
+ <nav aria-label="Sections"><a href="#story">Workflow</a><a href="#c3">Evidence</a><a href="#c4">Evaluation</a></nav></header>
 <main id="main">
 <section class="hero" id="top" aria-labelledby="h1">
  <div class="stage"><div class="sky"></div>
@@ -20,19 +19,19 @@
 <canvas id="fx" aria-hidden="true"></canvas><div class="spot" aria-hidden="true"></div>
 <div class="layer sig" data-k="12,6,.08"><svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" focusable="false" role="group" aria-label="Munshi signal route, six stages"><path class="route" pathLength="1" d="M900 390 L1030 335 L1160 365 L1290 300 L1400 340 L1510 315"/><path class="trail" pathLength="1" d="M900 390 L1030 335 L1160 365 L1290 300 L1400 340 L1510 315"/><g class="node n0" data-s="0" transform="translate(900 390)"><a href="#c0" aria-label="Observe: go to the Observe chapter"><circle class="hit" r="24"/><circle class="halo" r="13"/><circle class="core" r="4.5"/><text class="lab" y="-26" text-anchor="middle">Observe</text></a></g><g class="node n1" data-s="1" transform="translate(1030 335)"><a href="#c1" aria-label="Interpret: go to the Interpret chapter"><circle class="hit" r="24"/><circle class="halo" r="13"/><circle class="core" r="4.5"/><text class="lab" y="-26" text-anchor="middle">Interpret</text></a></g><g class="node n2" data-s="2" transform="translate(1160 365)"><a href="#c2" aria-label="Detect: go to the Detect chapter"><circle class="hit" r="24"/><circle class="halo" r="13"/><circle class="core" r="4.5"/><text class="lab" y="-26" text-anchor="middle">Detect</text></a></g><g class="node n3" data-s="3" transform="translate(1290 300)"><a href="#c3" aria-label="Investigate: go to the Investigate chapter"><circle class="hit" r="24"/><circle class="halo" r="13"/><circle class="core" r="4.5"/><text class="lab" y="-26" text-anchor="middle">Investigate</text></a></g><g class="node n4" data-s="4" transform="translate(1400 340)"><a href="#c4" aria-label="Evaluate: go to the Evaluate chapter"><circle class="hit" r="24"/><circle class="halo" r="13"/><circle class="core" r="4.5"/><text class="lab" y="-26" text-anchor="middle">Evaluate</text></a></g><g class="node n5" data-s="5" transform="translate(1510 315)"><a href="#c5" aria-label="Chronicle: go to the Chronicle chapter"><circle class="hit" r="24"/><circle class="halo" r="13"/><circle class="core" r="4.5"/><text class="lab" y="-26" text-anchor="middle">Chronicle</text></a></g></svg></div><div class="shade" aria-hidden="true"></div></div>
  <div class="hero-in">
-  <p class="kick rv"><span class="kick-dot" aria-hidden="true"></span><span class="kick-copy">SSH security intelligence</span><span class="kick-trace" aria-hidden="true"></span></p>
-  <h1 id="h1"><span class="ln1"><span>Every signal.</span></span><span class="ln2"><span>Accounted for.</span></span></h1>
+  <p class="kick rv"><span class="kick-dot" aria-hidden="true"></span><span class="kick-copy">Evidence stream</span><span class="kick-trace" aria-hidden="true"></span></p>
+  <h1 id="h1"><span class="ln1"><span>SSH logs.</span></span><span class="ln2"><span>Clear answers.</span></span></h1>
   <p class="lead rv">Analyze SSH authentication logs. Investigate the patterns. Follow every finding back to evidence.</p>
   <div class="cta rv"><button class="btn solid" data-open="analyze">Launch Munshi <i aria-hidden="true">&#8599;</i></button><a class="btn ghost" href="#story">Explore the workflow</a></div>
-  <p class="creed rv">From logs to insight. From noise to truth.</p>
+  <p class="creed rv">From logs to findings. From findings to evidence.</p>
  </div>
- <aside class="panel-peek" aria-label="Illustrative sample of the investigation view">
+  <aside class="panel-peek" aria-label="Illustrative replay of the investigation view">
   <div class="pk-h"><b>Investigation</b><span class="tag">Illustrative sample, not live data</span></div>
   <div class="pk-t">Password spray <code>203.0.113.x</code></div>
   <dl class="pk-f"><dt>Rule</dt><dd>8+ usernames, ~1 try each</dd><dt>Evidence</dt><dd>lines 41 to 58</dd></dl>
-  <pre class="pk-l"><span><b>41</b>Failed password for invalid user svc1 …</span><span class="hl"><b>42</b>Failed password for root …</span><span><b>43</b>Failed password for invalid user svc2 …</span></pre>
+   <pre class="pk-l"><span class="hl"><b>41</b>Failed password for invalid user svc1 …</span><span><b>42</b>Failed password for root …</span><span><b>43</b>Failed password for invalid user svc2 …</span><span><b>44</b>Failed password for deploy …</span><span><b>45</b>Accepted publickey for analyst …</span></pre>
+   <div class="pk-status" aria-hidden="true"><i></i><span>Reading line 41 · event linked</span></div>
  </aside>
- <ol class="strip" aria-label="Workflow"><li data-s="0">Observe</li><li data-s="1">Interpret</li><li data-s="2">Detect</li><li data-s="3">Investigate</li><li data-s="4">Evaluate</li><li data-s="5">Chronicle</li></ol>
 </section>
 <section class="story" id="story" data-stage="0">
  <nav class="rail" aria-label="Story progress"><ol><li data-s="0"><a href="#c0">Observe</a></li><li data-s="1"><a href="#c1">Interpret</a></li><li data-s="2"><a href="#c2">Detect</a></li><li data-s="3"><a href="#c3">Investigate</a></li><li data-s="4"><a href="#c4">Evaluate</a></li><li data-s="5"><a href="#c5">Chronicle</a></li></ol><span class="bar" aria-hidden="true"></span></nav>
@@ -44,15 +43,17 @@
  <article class="chap rv" id="c4"><h3>Evaluate</h3><div><p>The rules are scored against synthetic logs with planted attacks, including misses and false alarms. These results do not describe performance on real systems.</p><button class="btn ghost" data-open="evaluation">Open Evaluation</button></div></article>
  <article class="chap rv" id="c5"><h3>Chronicle</h3><div><p>Findings laid out in time order using only returned timestamps and counts. Observation and interpretation stay separate.</p></div></article>
 </section>
-<section class="final rv"><h2>Open the workspace.</h2><button class="btn solid" data-open="analyze">Launch Munshi <i aria-hidden="true">&#8599;</i></button></section>
+<section class="final rv"><h2>Open the workspace.</h2><p>Use the Launch Munshi button above to enter the workspace.</p></section>
 </main>
-<footer class="s-foot"><span>Munshi: SSH log investigation project</span><span>Deterministic rules. Synthetic evaluation.</span></footer>
+<footer class="s-foot"><span>Munshi · SSH log investigation</span><span>Local analysis · Evidence-linked findings</span></footer>
 </div>
 <div id="app" hidden>
- <aside class="side"><button class="brand" data-home aria-label="Munshi home"><img src="assets/munshi-mark.svg" alt="" width="28" height="28"><span>Munshi</span></button><nav id="nav" aria-label="Workspace"></nav><button class="kbd-hint" id="pal-open"><span>Search</span><kbd>Ctrl K</kbd></button><p class="side-note">Replay of loaded logs.<br>Not a live feed.</p></aside>
+ <aside class="side"><button class="brand" data-home aria-label="Munshi home"><img src="assets/munshi-mark.svg" alt="" width="28" height="28"><span>Munshi</span></button><nav id="nav" aria-label="Workspace"></nav><button class="kbd-hint" id="pal-open"><span>Search</span><kbd>Ctrl K</kbd></button><button class="guide-open" id="guide-open" type="button" aria-label="How to use Munshi"><span aria-hidden="true">?</span><span>How to use Munshi</span></button><p class="side-note">Replay of loaded logs.<br>Not a live feed.</p></aside>
  <section class="work"><header class="top"><h1 id="crumb"></h1><span id="dataset" class="pill"></span></header><div id="view" class="view" tabindex="-1"></div></section>
 </div>
+<div id="gateway" hidden aria-hidden="true"><div class="gateway-panel gateway-panel-left"></div><div class="gateway-panel gateway-panel-right"></div><div class="gateway-mark"><span>MUNSHI</span><span>AWAITS</span></div><div class="gateway-line" aria-hidden="true"></div><div class="gateway-label">SECURE WORKSPACE</div></div>
 <div id="pal" class="pal" hidden role="dialog" aria-modal="true" aria-label="Command palette"><div class="pal-box"><input id="pal-in" type="text" placeholder="Go to a screen or search loaded findings" aria-label="Search" autocomplete="off"><ul id="pal-list" role="listbox"></ul></div></div>
+<div id="guide" class="guide" hidden role="dialog" aria-modal="true" aria-labelledby="guide-title" aria-describedby="guide-copy"><div class="guide-box"><div class="guide-top"><span class="guide-kicker">A simple tour</span><button class="guide-close" id="guide-close" type="button" aria-label="Close guide">&#215;</button></div><div class="guide-progress" aria-hidden="true"><span id="guide-progress"></span></div><p class="guide-count" id="guide-count"></p><h2 id="guide-title"></h2><p id="guide-copy"></p><div class="guide-example" id="guide-example"></div><div class="guide-actions"><button class="app-btn" id="guide-back" type="button">Back</button><button class="app-btn pri" id="guide-next" type="button">Next</button></div></div></div>
 <p id="live" class="sr" role="status" aria-live="polite"></p>
 <script src="app.js"></script>
 </body></html>

@@ -68,6 +68,60 @@ class TestRules(unittest.TestCase):
         events = [ev(i, i * 30, f"svc{i}", "8.8.8.8") for i in range(1, 21)]
         self.assertEqual(detect(events)[0].label, "password_spray")
 
+    def test_several_tries_across_many_usernames_is_password_spray(self):
+        events = []
+        line_no = 1
+
+        for user_index in range(40):
+            for attempt in range(3):
+                events.append(
+                    ev(
+                        line_no,
+                        line_no * 4,
+                        f"user{user_index}",
+                        "8.8.8.8",
+                    )
+                )
+                line_no += 1
+
+        finding = detect(events)[0]
+
+        self.assertEqual(finding.kind, "password_spray")
+        self.assertEqual(finding.failures, 120)
+        self.assertEqual(len(finding.users), 40)
+
+    def test_many_tries_against_one_username_is_brute_force(self):
+        events = [
+            ev(i, i * 4, "root", "9.9.9.9")
+            for i in range(1, 121)
+        ]
+
+        finding = detect(events)[0]
+
+        self.assertEqual(finding.kind, "brute_force")
+        self.assertEqual(finding.failures, 120)
+
+    def test_ten_tries_each_against_twelve_usernames_is_brute_force(self):
+        events = []
+        line_no = 1
+
+        for user_index in range(12):
+            for attempt in range(10):
+                events.append(
+                    ev(
+                        line_no,
+                        line_no * 4,
+                        f"user{user_index}",
+                        "9.9.9.9",
+                    )
+                )
+                line_no += 1
+
+        finding = detect(events)[0]
+
+        self.assertEqual(finding.kind, "brute_force")
+        self.assertEqual(finding.failures, 120)
+
     def test_long_pause_splits_into_two_episodes(self):
         a = [ev(i, i * 3, "root", "7.7.7.7") for i in range(1, 16)]
         b = [ev(100 + i, 7200 + i * 3, "root", "7.7.7.7") for i in range(1, 16)]

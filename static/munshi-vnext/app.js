@@ -14,12 +14,28 @@ function h(tag, a, ...kids) {
 }
 function sv(tag, a) { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a || {})) e.setAttribute(k, v); return e; }
 const S = { view: "watch", data: null, ds: null, score: null, sel: null, line: null, filter: "all", q: "", sort: "start", busy: null, err: null };
+const PHASES = [
+  ["01", "Receive", "Preparing the log stream"],
+  ["02", "Parse", "Reading authentication events"],
+  ["03", "Detect", "Matching suspicious patterns"],
+  ["04", "Link", "Connecting findings to evidence"]
+];
 const NAV = [["watch", "Watch"], ["analyze", "Analyze"], ["findings", "Findings"], ["investigate", "Investigate"], ["chronicle", "Chronicle"], ["evaluation", "Evaluation"], ["reports", "Reports"]];
 const TYPE = { brute_force: "Brute force", brute_force_success: "Brute force, authentication observed", password_spray: "Password spray" };
 const COL = { brute_force: "var(--blue)", brute_force_success: "var(--red)", password_spray: "var(--vio)" };
 const fmt = (n) => Number(n).toLocaleString("en-US");
 const list = () => (S.data ? S.data.findings : []);
 const pct = (a, b) => (b ? `${((100 * a) / b).toFixed(1)}%` : "n/a");
+const sourceIps = (f) => Array.isArray(f.source_ips) && f.source_ips.length ? f.source_ips : [f.ip];
+const sourceFull = (f) => sourceIps(f).join(", ");
+const sourceShort = (f, n = 4) => {
+  const ips = sourceIps(f);
+  if (ips.length === 1) return ips[0];
+  const shown = ips.slice(0, n).join(", ");
+  const more = ips.length > n ? `, +${fmt(ips.length - n)} more` : "";
+  return `${fmt(ips.length)} addresses: ${shown}${more}`;
+};
+const Source = (f, n = 4) => h("span", { title: sourceFull(f) }, sourceShort(f, n));
 function auth(f) {
   const u = f.episode_success_users || [], n = f.episode_success_count ?? u.length;
   if (!n && !f.compromised) return { on: false, text: "No successful authentication observed in the window" };
@@ -34,19 +50,23 @@ async function call(url, opts) {
   return d;
 }
 async function run(kind, p, to) {
-  S.busy = kind === "file" ? `Analyzing ${p.name}…` : `Analyzing the ${p} sample…`; S.err = null; render();
+  S.busy = kind === "file" ? `Analyzing ${p.name}…` : `Analyzing the ${p} sample…`;
+  S.err = null; render(true);
   try {
+    let request;
     if (kind === "file") {
       const fd = new FormData(); fd.append("logfile", p);
-      S.data = await call("/api/analyze", { method: "POST", body: fd }); S.ds = { name: p.name, size: p.size }; S.score = null;
+      request = call("/api/analyze", { method: "POST", body: fd }).then((data) => { S.data = data; S.ds = { name: p.name, size: p.size }; S.score = null; });
     } else {
-      S.data = await call("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sample: p }) });
-      S.ds = { name: `${p} sample`, key: p }; S.score = null;
-      try { S.score = await call(`/api/score?set=${p}`); } catch (e) { S.err = "Analysis loaded, but scoring failed: " + e.message; }
+      request = call("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sample: p }) }).then(async (data) => {
+        S.data = data; S.ds = { name: `${p} sample`, key: p }; S.score = null;
+        try { S.score = await call(`/api/score?set=${p}`); } catch (e) { S.err = "Analysis loaded, but scoring failed: " + e.message; }
+      });
     }
+    await Promise.all([request, new Promise((resolve) => setTimeout(resolve, calm ? 0 : 2800))]);
     S.sel = null; S.line = null; S.filter = "all"; S.q = "";
   } catch (e) { S.err = e.message; }
-  S.busy = null; S.view = to; render();
+  S.busy = null; S.view = to; render(true);
 }
 const open = (f, line) => { S.sel = f; S.line = line ?? null; go("investigate"); };
 const Btn = (t, fn, c) => h("button", { class: `app-btn ${c || ""}`, onclick: fn }, t);
@@ -55,7 +75,7 @@ const Met = (l, v, n, c) => h("div", { class: `panel met ${c || ""}` }, h("small
 const sampleBtns = (to) => h("div", { class: "chips" }, Btn("Load Easy Sample", () => run("sample", "easy", to), "pri"), Btn("Load Hard Sample", () => run("sample", "hard", to)));
 const need = (what) => h("div", { class: "empty" }, h("b", {}, "No analysis loaded"), `${what} needs a log. Load a sample or upload a file.`, sampleBtns(S.view));
 const copy = (text, btn) => { const o = btn.textContent; (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => { btn.textContent = "Copied"; }, () => { btn.textContent = "Copy unavailable"; }).finally(() => setTimeout(() => (btn.textContent = o), 1200)); };
-const summary = (f) => `${TYPE[f.label] || f.label} from ${f.ip}, ${f.start} to ${f.end}: ${f.failures} failed attempts, ${f.n_users} usernames. ${auth(f).text}. Evidence lines: ${f.evidence_total}.`;
+const summary = (f) => `${TYPE[f.label] || f.label} from ${sourceShort(f)}, ${f.start} to ${f.end}: ${f.failures} failed attempts, ${f.n_users} usernames. ${auth(f).text}. Evidence lines: ${f.evidence_total}.`;
 function PathViz(f) {
   const a = auth(f), steps = [["Failures", fmt(f.failures)], ["Rule match", f.kind === "password_spray" ? "Password spray" : "Brute force"], ["Evidence", `${fmt(f.evidence_total)} lines`], ["Authentication", a.on ? "observed" : "none observed"]];
   const svg = sv("svg", { class: "pv", viewBox: "0 0 560 76", role: "img", "aria-label": `Path: ${steps.map((t) => t.join(" ")).join(", then ")}` });
@@ -81,7 +101,7 @@ const V = {};
 V.watch = () => {
   if (!S.data) return [Head("Watch", "Summary of the loaded log."), need("The overview")];
   const m = S.data.summary, L = list(), fa = S.score ? S.score.false_alarms : null, max = Math.max(1, ...L.map((f) => f.failures));
-  const bars = h("div", { class: "bars", role: "group", "aria-label": "Failed attempts per finding in start-time order" }, L.map((f, i) => { const b = h("button", { class: `bar ${auth(f).on ? "a" : ""}`, title: `${f.ip}: ${f.failures} failures`, "aria-label": `${f.ip}, ${f.failures} failures`, onclick: () => open(f) }); b.addEventListener("mouseenter", () => say(f)); b.addEventListener("focus", () => say(f)); b.style.height = `${(100 * f.failures) / max}%`; b.style.animationDelay = `${Math.min(i * 15, 400)}ms`; return b; }));
+  const bars = h("div", { class: "bars", role: "group", "aria-label": "Failed attempts per finding in start-time order" }, L.map((f, i) => { const b = h("button", { class: `bar ${auth(f).on ? "a" : ""}`, title: `${sourceShort(f)}: ${f.failures} failures. Full source list: ${sourceFull(f)}`, "aria-label": `${sourceShort(f)}, ${f.failures} failures`, onclick: () => open(f) }); b.addEventListener("mouseenter", () => say(f)); b.addEventListener("focus", () => say(f)); b.style.height = `${(100 * f.failures) / max}%`; b.style.animationDelay = `${Math.min(i * 15, 400)}ms`; return b; }));
   const readout = h("div", { class: "bar-readout", id: "readout", "aria-live": "polite" },
     h("div", { class: "br-empty" }, h("span", { class: "br-empty-dot" }), h("span", {}, "Hover or focus a bar to inspect its finding.")));
   const say = (f) => {
@@ -93,7 +113,7 @@ V.watch = () => {
         h("div", { class: "br-identity" },
           h("span", { class: "br-overline" }, "Selected finding"),
           h("strong", { class: "br-name" }, TYPE[f.label] || f.label),
-          h("code", { class: "br-ip mono" }, f.ip)), state),
+          h("code", { class: "br-ip mono", title: sourceFull(f) }, sourceShort(f))), state),
       h("div", { class: "br-metrics" }, facts.map(([label, value]) => h("div", { class: "br-metric" }, h("span", {}, label), h("b", {}, value)))),
       h("div", { class: "br-foot" }, h("span", { class: "mono br-window" }, `${f.start}  →  ${f.end}`), h("span", { class: "br-auth" }, a.text))
     );
@@ -107,7 +127,7 @@ V.watch = () => {
       Met("Authentication observed", fmt(L.filter((f) => auth(f).on).length), "findings with a success in window", "jade"), Met("False alarms", fa == null ? "n/a" : fa, fa == null ? "known for built-in samples only" : "per the answer key")),
     h("div", { class: "g2" }, h("div", { class: "panel" }, h("h3", {}, "Failed attempts per finding, in start-time order (red: authentication observed)"), L.length ? [bars, dots, readout] : "No findings."),
       h("div", { class: "panel" }, h("h3", {}, "Findings by type"), L.length ? Donut(L) : "No findings.")),
-    h("div", { class: "panel" }, h("h3", {}, "Most recent findings by start time"), h("ul", { class: "stream" }, recent.map((f) => h("li", {}, h("button", { onclick: () => open(f), onmouseenter: () => lit(f, true), onmouseleave: () => lit(f, false), onfocus: () => lit(f, true), onblur: () => lit(f, false) }, h("b", {}, TYPE[f.label] || f.label), h("small", { class: "mono" }, `${f.ip} · ${f.start} · ${fmt(f.failures)} failures`))))))];
+    h("div", { class: "panel" }, h("h3", {}, "Most recent findings by start time"), h("ul", { class: "stream" }, recent.map((f) => h("li", {}, h("button", { onclick: () => open(f), onmouseenter: () => lit(f, true), onmouseleave: () => lit(f, false), onfocus: () => lit(f, true), onblur: () => lit(f, false), title: sourceFull(f) }, h("b", {}, TYPE[f.label] || f.label), h("small", { class: "mono" }, `${sourceShort(f)} · ${f.start} · ${fmt(f.failures)} failures`))))))];
 };
 V.analyze = () => {
   const inp = h("input", { type: "file", accept: ".log,.txt", hidden: true, "aria-label": "Choose log file" });
@@ -117,27 +137,50 @@ V.analyze = () => {
   ["dragleave", "drop"].forEach((t) => z.addEventListener(t, (e) => { e.preventDefault(); z.classList.remove("over"); }));
   z.addEventListener("drop", (e) => e.dataTransfer.files[0] && run("file", e.dataTransfer.files[0], "analyze"));
   const m = S.data && S.data.summary;
-  const out = S.busy ? h("div", { class: "empty pulse" }, h("b", {}, S.busy), "The server parses and applies the rules in one request. No finer progress is reported, so none is shown.")
+  const out = S.busy ? h("div", { class: "parse-console", role: "status", "aria-live": "polite" },
+    h("div", { class: "parse-orbit", "aria-hidden": "true" }, h("span", { class: "orbit-core" }), h("i", {}), h("i", {}), h("i", {})),
+    h("div", { class: "parse-copy" }, h("b", {}, S.busy), h("span", {}, "Reading the local stream and linking each result to its source line.")),
+    h("div", { class: "parse-feed", "aria-hidden": "true" },
+      [["041", "Failed password for invalid user svc1", "203.0.113.5"], ["042", "Failed password for root", "203.0.113.5"], ["043", "Accepted publickey for analyst", "203.0.113.9"], ["044", "Failed password for invalid user svc2", "203.0.113.5"]].map(([line, text, ip]) =>
+        h("div", {}, h("small", {}, line), h("span", {}, text), h("code", {}, ip))
+      )
+    ),
+    h("ol", { class: "parse-steps" }, PHASES.map((phase) => h("li", {},
+      h("span", { class: "parse-num" }, phase[0]),
+      h("span", {}, h("b", {}, phase[1]), h("small", {}, phase[2]))
+    ))),
+    h("div", { class: "parse-trace", "aria-hidden": "true" }, h("span", {}, "AUTH STREAM"), h("i", {}), h("span", {}, "RULE ENGINE"), h("i", {}), h("span", {}, "EVIDENCE GRAPH"))
+  )
     : S.err ? h("div", { class: "empty err" }, h("b", {}, "Analysis problem"), S.err)
-    : m ? h("div", { class: "panel met jade" }, h("small", {}, "Analysis complete"), h("b", {}, `${fmt(m.events)} events`), h("span", {}, `${S.ds.name}${S.ds.size != null ? ` · ${fmt(S.ds.size)} bytes` : ""} · ${fmt(m.skipped)} skipped · ${m.findings} findings`), h("div", { class: "chips" }, Btn("View findings", () => go("findings"), "pri"), Btn("Open Watch", () => go("watch"))))
+    : m ? h("div", { class: "panel met jade complete-card" },
+      h("small", {}, "Analysis complete"),
+      h("b", {}, `${fmt(m.events)} events`),
+      h("div", { class: "complete-meta" },
+        h("div", {}, h("span", {}, "Dataset"), h("strong", {}, S.ds.name)),
+        S.ds.size != null ? h("div", {}, h("span", {}, "Input size"), h("strong", {}, `${fmt(S.ds.size)} bytes`)) : null,
+        h("div", {}, h("span", {}, "Skipped"), h("strong", {}, fmt(m.skipped))),
+        h("div", {}, h("span", {}, "Findings"), h("strong", {}, fmt(m.findings)))
+      ),
+      h("div", { class: "complete-actions" }, Btn("View findings", () => go("findings"), "pri"), Btn("Open Watch", () => go("watch")))
+    )
     : h("div", { class: "empty" }, h("b", {}, "No log loaded"), "Choose a file or load a built-in synthetic sample.");
   return [Head("Analyze", "Load an SSH authentication log."), z, sampleBtns("analyze"), out];
 };
 V.findings = () => {
   if (!S.data) return [Head("Findings", "Rule matches in the loaded log."), need("The findings queue")];
   const L = list(), kinds = [...new Set(L.map((f) => f.label))], q = S.q.toLowerCase();
-  let shown = L.filter((f) => (S.filter === "all" || (S.filter === "auth" ? auth(f).on : f.label === S.filter)) && (!q || f.ip.includes(q) || f.users.some((u) => u.toLowerCase().includes(q)) || (TYPE[f.label] || "").toLowerCase().includes(q)));
+  let shown = L.filter((f) => (S.filter === "all" || (S.filter === "auth" ? auth(f).on : f.label === S.filter)) && (!q || sourceIps(f).some((ip) => ip.includes(q)) || f.users.some((u) => u.toLowerCase().includes(q)) || (TYPE[f.label] || "").toLowerCase().includes(q)));
   shown = shown.sort((a, b) => S.sort === "failures" ? b.failures - a.failures : a.start.localeCompare(b.start));
   const chip = (k, n, c) => h("button", { class: `chip ${S.filter === k ? "on" : ""}`, "aria-pressed": S.filter === k, onclick: () => { S.filter = k; render(); } }, `${n} (${c})`);
   const search = h("input", { class: "in-s", type: "search", placeholder: "Search IP, username, type", "aria-label": "Search findings", value: S.q });
   search.addEventListener("input", () => { S.q = search.value; const p = search.selectionStart; render(); const n = $("#view .in-s"); n.focus(); n.setSelectionRange(p, p); });
   const sort = h("select", { class: "in-s", "aria-label": "Sort", onchange: (e) => { S.sort = e.target.value; render(); } }, h("option", { value: "start", selected: S.sort === "start" }, "Sort: start time"), h("option", { value: "failures", selected: S.sort === "failures" }, "Sort: most failures"));
-  const pvp = h("div", { class: "panel pvp" }), showPath = (f) => pvp.replaceChildren(h("h3", {}, `Signal path: ${f.ip}, ${TYPE[f.label] || f.label}`), PathViz(f));
+  const pvp = h("div", { class: "panel pvp" }), showPath = (f) => pvp.replaceChildren(h("h3", {}, `Signal path: ${sourceShort(f)}, ${TYPE[f.label] || f.label}`), PathViz(f));
   if (shown[0]) showPath(shown[0]);
-  const tr = (f) => { const a = auth(f), r = h("tr", { tabindex: 0, class: S.sel === f ? "sel" : "", onclick: () => open(f) }, h("td", {}, h("b", {}, TYPE[f.label] || f.label)), h("td", { class: "mono" }, f.ip), h("td", { class: "mono" }, f.start), h("td", {}, fmt(f.failures)), h("td", {}, f.n_users), h("td", {}, h("span", { class: `st ${a.on ? "j" : ""}` }, a.on ? (a.text.includes("ambiguous") ? "Observed, ambiguous" : "Authentication observed") : "Failures only")));
+  const tr = (f) => { const a = auth(f), r = h("tr", { tabindex: 0, class: S.sel === f ? "sel" : "", onclick: () => open(f) }, h("td", {}, h("b", {}, TYPE[f.label] || f.label)), h("td", { class: "mono" }, Source(f)), h("td", { class: "mono" }, f.start), h("td", {}, fmt(f.failures)), h("td", {}, f.n_users), h("td", {}, h("span", { class: `st ${a.on ? "j" : ""}` }, a.on ? (a.text.includes("ambiguous") ? "Observed, ambiguous" : "Authentication observed") : "Failures only")));
     r.addEventListener("keydown", (e) => e.key === "Enter" && open(f)); r.addEventListener("mouseenter", () => showPath(f)); r.addEventListener("focus", () => showPath(f)); return r; };
   return [Head("Findings", "Rule matches only. No severity score exists, and an IP address is not a person."), h("div", { class: "chips" }, search, sort), h("div", { class: "chips" }, chip("all", "All", L.length), kinds.map((k) => chip(k, TYPE[k] || k, L.filter((f) => f.label === k).length)), chip("auth", "Authentication observed", L.filter((f) => auth(f).on).length)),
-    shown.length ? [pvp, h("div", { class: "panel" }, h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, ["Rule", "Source IP", "First failure", "Failures", "Usernames", "Authentication"].map((c) => h("th", {}, c)))), h("tbody", {}, shown.map(tr))))] : h("div", { class: "empty" }, h("b", {}, "No findings match"), "Clear the search or pick another filter.")];
+    shown.length ? [pvp, h("div", { class: "panel" }, h("table", { class: "tbl" }, h("thead", {}, h("tr", {}, ["Rule", "Source", "First failure", "Failures", "Usernames", "Authentication"].map((c) => h("th", {}, c)))), h("tbody", {}, shown.map(tr))))] : h("div", { class: "empty" }, h("b", {}, "No findings match"), "Clear the search or pick another filter.")];
 };
 function pickLine(n) {
   S.line = n;
@@ -381,7 +424,7 @@ V.investigate = () => {
   return [
     Head(
       `${TYPE[f.label] || f.label}`,
-      `Source ${f.ip}. A rule match, not proof of intent or identity.`
+      `Source ${sourceShort(f)}. A rule match, not proof of intent or identity.`
     ),
 
     h("div", { class: "panel pvp" }, PathViz(f)),
@@ -401,7 +444,7 @@ V.investigate = () => {
           h(
             "dl",
             { class: "f" },
-            row("Source IP", f.ip, "mono"),
+            row("Source", h("span", { title: sourceFull(f) }, sourceShort(f)), "mono"),
             row("First failure", f.start, "mono"),
             row("Last", f.end, "mono"),
             row("Failures", fmt(f.failures)),
@@ -448,7 +491,7 @@ V.chronicle = () => {
   if (!list().length) return [Head("Chronicle", "What was observed, and in what order?"), S.data ? h("div", { class: "empty" }, h("b", {}, "No findings to order")) : need("The chronicle")];
   const L = [...list()].sort((x, y) => x.start.localeCompare(y.start));
   return [Head("Chronicle", "Findings in time order. Recorded facts only; no narrative or interpretation is generated."),
-    h("div", { class: "panel" }, h("ul", { class: "tl" }, L.map((f) => { const first = f.evidence_preview[0]; return h("li", { class: auth(f).on ? "a" : "" }, h("div", { class: "mono" }, `${f.start} to ${f.end}`), h("b", {}, TYPE[f.label] || f.label), h("div", { class: "sub" }, `${f.ip} · ${fmt(f.failures)} failures · ${f.n_users} usernames · ${auth(f).text}`), h("div", { class: "chips" }, first ? Btn(`Evidence from line ${first.line}`, () => open(f, first.line)) : null)); }))),
+    h("div", { class: "panel" }, h("ul", { class: "tl" }, L.map((f) => { const first = f.evidence_preview[0]; return h("li", { class: auth(f).on ? "a" : "" }, h("div", { class: "mono" }, `${f.start} to ${f.end}`), h("b", {}, TYPE[f.label] || f.label), h("div", { class: "sub" }, h("span", { title: sourceFull(f) }, sourceShort(f)), ` · ${fmt(f.failures)} failures · ${f.n_users} usernames · ${auth(f).text}`), h("div", { class: "chips" }, first ? Btn(`Evidence from line ${first.line}`, () => open(f, first.line)) : null)); }))),
     h("p", { class: "note" }, "Interpretation (intent, identity, compromise) is not made here. Investigation explains why a rule matched; Chronicle only orders what was recorded.")];
 };
 V.evaluation = () => {
@@ -466,35 +509,45 @@ V.reports = () => {
   if (!S.data) return [Head("Reports", "Export the loaded analysis."), need("A report")];
   const save = (n, t, x) => { const u = URL.createObjectURL(new Blob([x], { type: t })); const l = h("a", { href: u, download: n }); document.body.append(l); l.click(); l.remove(); URL.revokeObjectURL(u); };
   const q = (x) => `"${String(x).replace(/"/g, '""')}"`, m = S.data.summary, sc = S.score, L = [...list()].sort((a, b) => a.start.localeCompare(b.start));
-  const csv = () => ["type,source_ip,start,end,failures,usernames,authentication_observed,evidence_lines"].concat(list().map((f) => [f.label, f.ip, f.start, f.end, f.failures, f.n_users, auth(f).on, f.evidence_total].map(q).join(","))).join("\n");
+  const csv = () => ["type,n_source_ips,source_ips,representative_source_ip,start,end,failures,usernames,authentication_observed,evidence_lines"].concat(list().map((f) => [f.label, sourceIps(f).length, sourceIps(f).join(";"), f.ip, f.start, f.end, f.failures, f.n_users, auth(f).on, f.evidence_total].map(q).join(","))).join("\n");
   return [Head("Reports", "JSON and CSV download, and Print (choose “Save as PDF” in the print dialog). The page below is the report."),
     h("div", { class: "chips noprint" }, Btn("Download JSON", () => save("munshi_report.json", "application/json", JSON.stringify({ dataset: S.ds, summary: m, findings: list(), score: sc }, null, 2)), "pri"), Btn("Download CSV", () => save("munshi_findings.csv", "text/csv", csv())), Btn("Print", () => window.print())),
     h("div", { class: "paper print-ok" }, h("h2", {}, "Munshi analysis report"), h("p", { class: "mono" }, `Dataset: ${S.ds.name}`),
       h("h3", {}, "1. Analysis summary"), h("p", {}, `${fmt(m.events)} events read, ${fmt(m.skipped)} lines skipped, ${m.findings} rule matches.`),
-      h("h3", {}, "2. Detection findings and evidence references"), h("table", {}, h("thead", {}, h("tr", {}, ["Rule", "Source", "Failures", "Evidence lines (shown)"].map((c) => h("th", {}, c)))), h("tbody", {}, L.slice(0, 20).map((f) => h("tr", {}, h("td", {}, TYPE[f.label] || f.label), h("td", { class: "mono" }, f.ip), h("td", {}, fmt(f.failures)), h("td", { class: "mono" }, f.evidence_preview.length ? `${f.evidence_preview[0].line} to ${f.evidence_preview[f.evidence_preview.length - 1].line} of ${fmt(f.evidence_total)}` : "none"))))), L.length > 20 ? h("p", {}, `…${L.length - 20} more in the exports.`) : null,
-      h("h3", {}, "3. Chronological sequence"), h("ul", {}, L.slice(0, 20).map((f) => h("li", { class: "mono" }, `${f.start}  ${f.label}  ${f.ip}`))),
+      h("h3", {}, "2. Detection findings and evidence references"), h("table", {}, h("thead", {}, h("tr", {}, ["Rule", "Source", "Failures", "Evidence lines (shown)"].map((c) => h("th", {}, c)))), h("tbody", {}, L.slice(0, 20).map((f) => h("tr", {}, h("td", {}, TYPE[f.label] || f.label), h("td", { class: "mono", title: sourceFull(f) }, sourceShort(f)), h("td", {}, fmt(f.failures)), h("td", { class: "mono" }, f.evidence_preview.length ? `${fmt(f.evidence_preview.length)} of ${fmt(f.evidence_total)} lines shown` : "none"))))), L.length > 20 ? h("p", {}, `…${L.length - 20} more in the exports.`) : null,
+      h("h3", {}, "3. Chronological sequence"), h("ul", {}, L.slice(0, 20).map((f) => h("li", { class: "mono", title: sourceFull(f) }, `${f.start}  ${TYPE[f.label] || f.label}  ${sourceShort(f)}`))),
       sc ? [h("h3", {}, "4. Evaluation (synthetic data)"), h("p", {}, `${sc.detected} of ${sc.planted} planted attacks detected; ${sc.planted - sc.detected} missed; ${sc.false_alarms} false alarms.`)] : null,
-      h("h3", {}, "Limitations"), h("p", {}, "Rule-based and per-IP. Distributed or slow attacks can be missed; shared IPs can cause false alarms. An IP address is not a person. Synthetic results do not describe real-world performance."))];
+      h("h3", {}, "Limitations"), h("p", {}, "Rule-based detection with per-IP rules plus one cross-address rule. Thresholds are fixed and narrow, so activity just outside them can be missed. Shared addresses and forgotten-password retries can cause false alarms. An address is not a person. Results on synthetic data do not describe real-world performance."))];
 };
 function go(v) { S.view = v; render(); }
-function render() {
+function render(preserveScroll = false) {
   $("#nav").replaceChildren(...NAV.map(([k, n]) => h("button", { class: `nav ${S.view === k ? "on" : ""}`, "aria-current": S.view === k ? "page" : null, "aria-label": n, onclick: () => go(k) }, h("b", {}, n[0]), h("span", {}, n))));
-  $("#crumb").textContent = NAV.find((n) => n[0] === S.view)[1];
-  const d = $("#dataset"); d.textContent = S.ds ? S.ds.name : "no dataset"; d.className = `pill ${S.ds ? "on" : ""}`;
+  $("#crumb").textContent = "Workspace";
+  const d = $("#dataset"); d.textContent = S.ds ? `Loaded · ${S.ds.name}` : "Awaiting log"; d.className = `pill ${S.ds ? "on" : ""}`;
   d.dataset.state = S.busy ? "busy" : S.err ? "err" : S.ds ? "ok" : "none";
   $("#live").textContent = S.busy ? S.busy : S.err ? `Problem: ${S.err}` : S.data ? `${S.ds.name} loaded: ${fmt(S.data.summary.events)} events, ${S.data.summary.findings} findings.` : "";
-  const v = $("#view"); let kids;
+  const v = $("#view");
+  const scrollTop = v.scrollTop;
+  const pageScrollTop = window.scrollY;
+  let kids;
   if (S.busy && S.view !== "analyze") kids = [h("div", { class: "empty pulse" }, h("b", {}, S.busy))];
   else kids = [V[S.view]()].flat(3).filter(Boolean);
   const ae = document.activeElement, keep = ae && ae.classList.contains("in-s");
-  v.replaceChildren(...kids); v.style.animation = "none"; void v.offsetWidth; v.style.animation = ""; if (!keep) v.scrollTop = 0;
+  v.replaceChildren(...kids);
+  v.scrollTop = preserveScroll ? scrollTop : 0;
+  if (preserveScroll) {
+    requestAnimationFrame(() => {
+      v.scrollTop = scrollTop;
+      window.scrollTo(0, pageScrollTop);
+    });
+  }
 }
 // command palette (Ctrl/Cmd+K)
 let palSel = 0, palItems = [];
 function palRender() {
   const q = $("#pal-in").value.toLowerCase().trim();
   palItems = NAV.filter(([, n]) => n.toLowerCase().includes(q)).map(([k, n]) => ({ t: `Go to ${n}`, s: "screen", fn: () => go(k) }));
-  if (q) list().filter((f) => f.ip.includes(q) || f.users.some((u) => u.toLowerCase().includes(q)) || (TYPE[f.label] || "").toLowerCase().includes(q)).slice(0, 8).forEach((f) => palItems.push({ t: `${TYPE[f.label] || f.label}`, s: `${f.ip} · ${f.start}`, fn: () => open(f) }));
+  if (q) list().filter((f) => sourceIps(f).some((ip) => ip.includes(q)) || f.users.some((u) => u.toLowerCase().includes(q)) || (TYPE[f.label] || "").toLowerCase().includes(q)).slice(0, 8).forEach((f) => palItems.push({ t: `${TYPE[f.label] || f.label}`, s: `${sourceShort(f)} · ${f.start}`, fn: () => open(f) }));
   palSel = Math.min(palSel, Math.max(palItems.length - 1, 0));
   $("#pal-list").replaceChildren(...(palItems.length ? palItems.map((it, i) => h("li", { role: "option", "aria-selected": i === palSel ? "true" : "false", onclick: () => palGo(i) }, h("span", {}, it.t), h("small", {}, it.s))) : [h("li", {}, "No match")]));
 }
@@ -509,11 +562,45 @@ $("#pal-in").addEventListener("keydown", (e) => {
 });
 $("#pal").addEventListener("click", (e) => e.target.id === "pal" && palClose());
 $("#pal-open").addEventListener("click", palOpen);
-document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#pal").hidden ? palOpen() : palClose(); } else if (e.key === "Escape" && !$("#pal").hidden) palClose(); });
+const GUIDE = [
+  ["Start with a log", "Munshi needs an SSH authentication log to investigate. Choose a file from your computer, or use Easy Sample to see a safe example without preparing anything.", "Look for the Analyze screen. Your file is processed in memory and is not stored by Munshi."],
+  ["Let Munshi read it", "Munshi reads the authentication events, looks for repeated login failures, and checks whether an authentication was observed.", "The short Receive, Parse, Detect, and Link sequence is the analysis in progress. You do not need to wait for or understand each stage."],
+  ["Read the overview", "Watch gives you the big picture: how many events were read, how many patterns were found, and when the activity happened.", "Start here when you want a quick answer. Nothing is labelled a finding unless Munshi can connect it to log evidence."],
+  ["Open a finding", "Findings turns a suspicious pattern into a plain-language explanation. You can see the source addresses, usernames, failed attempts, time window, and authentication outcome.", "An authentication being observed is reported as evidence—not as proof of who was behind an address or what happened next."],
+  ["Check the evidence", "Investigate lets you follow the explanation back to the exact lines in the original log. Select a line to see the event that supports the finding.", "This is the most important habit: use the summary for speed, then use the evidence view to verify what Munshi saw."]
+];
+let guideStep = 0, guideReturnFocus = null;
+function guideRender() {
+  const [title, copyText, example] = GUIDE[guideStep];
+  $("#guide-count").textContent = `Step ${guideStep + 1} of ${GUIDE.length}`;
+  $("#guide-title").textContent = title;
+  $("#guide-copy").textContent = copyText;
+  $("#guide-example").textContent = example;
+  $("#guide-progress").style.width = `${((guideStep + 1) / GUIDE.length) * 100}%`;
+  $("#guide-back").disabled = guideStep === 0;
+  $("#guide-next").textContent = guideStep === GUIDE.length - 1 ? "Done" : "Next";
+}
+function guideOpen() {
+  guideReturnFocus = document.activeElement;
+  guideStep = 0;
+  $("#guide").hidden = false;
+  guideRender();
+  $("#guide-next").focus();
+}
+function guideClose() {
+  $("#guide").hidden = true;
+  if (guideReturnFocus && typeof guideReturnFocus.focus === "function") guideReturnFocus.focus();
+}
+$("#guide-open").addEventListener("click", guideOpen);
+$("#guide-close").addEventListener("click", guideClose);
+$("#guide-back").addEventListener("click", () => { guideStep = Math.max(guideStep - 1, 0); guideRender(); });
+$("#guide-next").addEventListener("click", () => { if (guideStep === GUIDE.length - 1) guideClose(); else { guideStep += 1; guideRender(); } });
+$("#guide").addEventListener("click", (e) => e.target.id === "guide" && guideClose());
+document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#pal").hidden ? palOpen() : palClose(); } else if (e.key === "Escape") { if (!$("#guide").hidden) guideClose(); else if (!$("#pal").hidden) palClose(); } });
 function enter(view) { $("#site").hidden = true; $("#app").hidden = false; document.body.className = "is-app"; S.view = view; render(); $("#view").focus(); }
-function home() { $("#app").hidden = true; $("#site").hidden = false; document.body.className = "is-site"; window.scrollTo(0, 0); }
+function home() { $("#app").hidden = true; $("#gateway").hidden = true; $("#site").hidden = false; document.body.className = "is-site"; window.scrollTo(0, 0); }
 let leaving = false;
-function launch(view) { if (leaving) return; if (calm) { enter(view); return; } leaving = true; $("#site").classList.add("leave"); setTimeout(() => { enter(view); $("#site").classList.remove("leave"); leaving = false; }, 230); }
+function launch(view) { if (leaving) return; if (calm) { enter(view); return; } leaving = true; $("#site").classList.add("leave"); $("#gateway").hidden = false; requestAnimationFrame(() => $("#gateway").classList.add("active")); setTimeout(() => enter(view), 1400); setTimeout(() => { $("#gateway").classList.remove("active"); $("#gateway").hidden = true; $("#site").classList.remove("leave"); leaving = false; }, 5000); }
 document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => launch(b.dataset.open)));
 document.querySelector("[data-home]").addEventListener("click", home);
 // ---- landing live effects (all decorative; nothing here represents real security data) ----
@@ -522,7 +609,27 @@ if ("IntersectionObserver" in window && !calm) { const io = new IntersectionObse
 else revs.forEach((n) => n.classList.add("in"));
 // signal node / stage-label linking (hover or keyboard focus lights the matching label)
 const hot = (k, on) => document.querySelectorAll(`[data-s="${k}"]`).forEach((e) => e.classList.toggle("hot", on));
-document.querySelectorAll(".node,.strip li").forEach((e) => { const k = e.dataset.s; ["mouseenter", "focusin"].forEach((t) => e.addEventListener(t, () => hot(k, true))); ["mouseleave", "focusout"].forEach((t) => e.addEventListener(t, () => hot(k, false))); });
+document.querySelectorAll(".node").forEach((e) => { const k = e.dataset.s; ["mouseenter", "focusin"].forEach((t) => e.addEventListener(t, () => hot(k, true))); ["mouseleave", "focusout"].forEach((t) => e.addEventListener(t, () => hot(k, false))); });
+// Small landing-page replay: representative lines only, independent of analysis data.
+(function investigationReplay() {
+  const panel = $(".panel-peek"), rows = [...document.querySelectorAll(".pk-l span")], status = $(".pk-status span");
+  if (calm || !panel || !rows.length || !status) return;
+  let index = 0, timer = 0, visible = false;
+  const step = () => {
+    if (!visible || document.hidden) return;
+    rows.forEach((row, i) => row.classList.toggle("hl", i === index));
+    status.textContent = `Reading line ${rows[index].querySelector("b").textContent} · event linked`;
+    index = (index + 1) % rows.length;
+  };
+  const start = () => { if (timer) return; step(); timer = window.setInterval(step, 1250); };
+  const stop = () => { if (timer) { clearInterval(timer); timer = 0; } };
+  if ("IntersectionObserver" in window) new IntersectionObserver((entries) => {
+    visible = entries[0].isIntersecting;
+    visible ? start() : stop();
+  }, { threshold: .35 }).observe(panel);
+  else { visible = true; start(); }
+  document.addEventListener("visibilitychange", () => document.hidden ? stop() : (visible && start()));
+})();
 // scroll-linked story progression
 (function story() {
   const sec = $("#story"), chaps = [...document.querySelectorAll(".chap")], rl = [...document.querySelectorAll(".rail li")], bar = $(".rail .bar");
@@ -533,7 +640,7 @@ document.querySelectorAll(".node,.strip li").forEach((e) => { const k = e.datase
 // living signal landscape: clean animated waves, layered parallax and pointer light
 (function stage() {
   const hero = $(".hero"), cv = $("#fx"), spot = $(".spot"), ctx = cv && cv.getContext ? cv.getContext("2d") : null;
-  if (calm || !hero || !ctx) return;
+  if (calm || !hero || !ctx || getComputedStyle(cv).display === "none") return;
   const layers = [...document.querySelectorAll(".layer")].map((el) => ({ el, k: el.dataset.k.split(",").map(Number) }));
   let W = 0, H = 0, tx = 0, ty = 0, cx = 0, cy = 0, mx = 0, my = 0, sx = 0, sy = 0, raf = 0, run = false, last = 0, inView = false;
   function size() {
@@ -547,65 +654,54 @@ document.querySelectorAll(".node,.strip li").forEach((e) => { const k = e.datase
     layers.forEach((l) => { l.el.style.transform = `translate3d(${(-cx * l.k[0]).toFixed(2)}px,${(-cy * l.k[1] + sc * l.k[2]).toFixed(2)}px,0)`; });
     spot.style.transform = `translate3d(${sx.toFixed(1)}px,${sy.toFixed(1)}px,0)`;
     ctx.clearRect(0, 0, W, H);
-    // Living signal ocean: broad, shape-changing swells with visible traveling crest highlights.
-    // The left edge is intentionally quieter so the headline remains readable.
+    // Living signal ocean: broad, connected water bodies. The wave shapes move;
+    // separate moving contour lines are intentionally avoided.
     const smoothstep = (a, b, x) => { const u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); };
-    const envelope = (x) => 0.16 + 0.84 * smoothstep(W * 0.12, W * 0.88, x);
+    const envelope = (x) => 0.42 + 0.58 * smoothstep(-W * 0.08, W * 0.92, x);
     ctx.save();
-    ctx.globalCompositeOperation = "screen";
-    for (let i = 0; i < 6; i++) {
-      const base = H * (0.19 + i * 0.12);
-      const amp = Math.min(H * 0.06, 24 + i * 4.1);
-      const phase = t * (0.00031 + i * 0.000043) + i * 1.07;
+    ctx.globalCompositeOperation = "source-over";
+    for (let i = 0; i < 3; i++) {
+      const base = H * (0.1 + i * 0.2);
+      const amp = Math.min(H * 0.11, 40 + i * 6);
+      const depth = H * 0.18;
+      const phase = t * (0.00034 + i * 0.000035) + i * 1.13;
       const waveY = (x) => {
         const e = envelope(x);
-        const swell = Math.sin(x * 0.0022 + phase) * amp
-          + Math.sin(x * 0.0057 - phase * 0.72 + i * 0.36) * amp * 0.28
-          + Math.cos(x * 0.00115 + phase * 0.44 - i * 0.21) * amp * 0.22;
+        const swell = Math.sin(x * 0.0022 - phase) * amp
+          + Math.sin(x * 0.0048 - phase * 0.62 + i * 0.42) * amp * 0.25
+          + Math.cos(x * 0.00125 - phase * 0.38 - i * 0.2) * amp * 0.2
+          + Math.sin(x * 0.00072 - phase * 0.22 + i * 0.8) * amp * 0.32;
         return base + swell * e;
       };
-      // A very low-opacity body gives the crest a watery surface rather than a bare wireframe.
-      if (i % 2 === 0) {
-        ctx.beginPath();
-        for (let x = -8; x <= W + 8; x += 7) {
-          const y = waveY(x);
-          if (x <= -8) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.lineTo(W + 8, H * 1.15);
-        ctx.lineTo(-8, H * 1.15);
-        ctx.closePath();
-        const body = ctx.createLinearGradient(0, base - amp, 0, H * 1.05);
-        body.addColorStop(0, `rgba(42,111,194,${0.035 + i * 0.003})`);
-        body.addColorStop(0.42, `rgba(32,91,166,${0.018 + i * 0.002})`);
-        body.addColorStop(1, "rgba(8,14,28,0)");
-        ctx.fillStyle = body;
-        ctx.fill();
-      }
-      // Stable blue contour.
       ctx.beginPath();
-      for (let x = -8; x <= W + 8; x += 6) {
+      for (let x = -8; x <= W + 8; x += 7) {
         const y = waveY(x);
         if (x <= -8) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
-      ctx.strokeStyle = `rgba(105,183,255,${0.11 + i * 0.018})`;
-      ctx.lineWidth = 1.05 + i * 0.1;
-      ctx.stroke();
-      // A moving highlight travels along each evolving crest, so water movement is perceptible.
-      const head = ((t * 0.052 + i * W / 5) % (W + 420)) - 210;
-      const sheen = ctx.createLinearGradient(head - 210, 0, head + 210, 0);
-      sheen.addColorStop(0, "rgba(105,183,255,0)");
-      sheen.addColorStop(0.34, "rgba(105,183,255,0.035)");
-      sheen.addColorStop(0.5, `rgba(198,231,255,${0.26 + i * 0.018})`);
-      sheen.addColorStop(0.66, "rgba(105,183,255,0.06)");
-      sheen.addColorStop(1, "rgba(105,183,255,0)");
+      for (let x = W + 8; x >= -8; x -= 7) {
+        const y = waveY(x) + depth + Math.sin(x * 0.0018 + phase) * amp * 0.18;
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      const body = ctx.createLinearGradient(0, base - amp, 0, base + depth);
+      body.addColorStop(0, `rgba(72,151,226,${0.11 - i * 0.008})`);
+      body.addColorStop(0.42, `rgba(27,76,145,${0.065 - i * 0.004})`);
+      body.addColorStop(1, "rgba(8,14,28,0)");
+      ctx.fillStyle = body;
+      ctx.fill();
+
+      const crest = ctx.createLinearGradient(0, base - amp, 0, base + amp * 0.7);
+      crest.addColorStop(0, `rgba(137,198,255,${0.045 - i * 0.004})`);
+      crest.addColorStop(1, "rgba(137,198,255,0)");
       ctx.beginPath();
-      for (let x = -8; x <= W + 8; x += 6) {
+      for (let x = -8; x <= W + 8; x += 7) {
         const y = waveY(x);
         if (x <= -8) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
-      ctx.strokeStyle = sheen;
-      ctx.lineWidth = 1.35 + i * 0.08;
-      ctx.stroke();
+      for (let x = W + 8; x >= -8; x -= 7) ctx.lineTo(x, waveY(x) + Math.max(10, amp * 0.14));
+      ctx.closePath();
+      ctx.fillStyle = crest;
+      ctx.fill();
     }
     ctx.restore();
   }

@@ -7,19 +7,19 @@
 | False alarms (Watch) | `false_alarms` from `GET /api/score?set=` (samples only) |
 | Donut | count of `findings[].label`, colors by type |
 | Recent findings | `findings[]` sorted by `start` descending (top 6) |
-| Findings search/sort | client-side over `ip, users, label, start, failures` |
+| Findings search/sort | client-side over `source_ips, users, label, start, failures` |
 | Command palette | navigation items + loaded `findings[]` |
 | Evidence timeline | `evidence_preview[].line` and the time prefix of `.text`; success lines from `episode_success_lines` |
-| Report evidence refs | first/last of `evidence_preview[].line`, `evidence_total` |
+| Report evidence refs | shown count from `evidence_preview.length`, total count from `evidence_total` |
 | Hero panel | illustrative only, not API data |
 | Bar chart | `findings[].failures`, ordered by `start`; no invented time series |
 | Findings by type | count of `findings[].label` |
-| Queue row | `label, ip, start, failures, n_users, episode_success_*` |
-| Details | `ip, start, end, users (max 10), n_users, evidence_total` |
+| Queue row | `label, source_ips, start, failures, n_users, episode_success_*` |
+| Details | `source_ips, start, end, users (max 10), n_users, evidence_total` |
 | Raw log | `evidence_preview[]` `{line, text}` (max 25 per finding); lines in `episode_success_lines` highlighted |
 | Chronicle | findings sorted by `start`; only returned values, no narrative |
 | Evaluation | `planted, detected, correct_type, false_alarms, false_alarm_causes, by_variant{planted,detected,correct_type}`; "Missed" = planted − detected (computed) |
-| Reports | JSON/CSV built in the browser from the same responses; print via `window.print()` |
+| Reports | JSON/CSV built in the browser from the same responses, including full `source_ips`; print via `window.print()` |
 
 ## Request formats
 - Upload: `multipart/form-data`, field `logfile`, max 2 MB (413 otherwise).
@@ -30,7 +30,7 @@
 - Per-attack results (which planted attack was missed): the API returns counts only.
 - Per-event timestamps beyond the finding's `start`/`end` and the raw text; no timeline chart of individual events.
 - Evidence beyond 25 lines per finding; usernames beyond 10.
-- Narratives, severity scores, PDF generation, live monitoring: not implemented.
+- Severity scores, backend PDF generation, live monitoring: not implemented. Browser print-to-PDF is available from Reports.
 - Year: logs have none; the parser assumes 2026.
 
 ## Live effects (decorative; none of this is data)

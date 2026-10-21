@@ -15,7 +15,8 @@ SECURITY CHOICES (good seminar talking points)
 - Debug mode is OFF and the server binds to 127.0.0.1 (this machine only).
 - Basic security headers are added to every response.
 
-Run:  python app.py     then open http://127.0.0.1:5000
+Run locally:  python app.py     then open http://127.0.0.1:5000
+Production:   gunicorn --bind 0.0.0.0:$PORT "app:create_app()"
 """
 
 import io

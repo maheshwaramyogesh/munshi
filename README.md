@@ -80,6 +80,21 @@ You can upload a supported SSH authentication log through the interface or analy
 
 The upload limit is 2 MiB. Unsupported or malformed lines may be reported as skipped rather than interpreted as authentication events.
 
+## Put the demo on your phone
+
+For a phone-only demo, deploy Munshi as a web service instead of relying on
+`127.0.0.1` on your laptop. The repository includes a Render deployment
+configuration in [`render.yaml`](./render.yaml).
+
+1. Push this repository to GitHub.
+2. Create a Render account and choose **New > Blueprint**.
+3. Select the GitHub repository and confirm the `render.yaml` configuration.
+4. Wait for the deployment to finish, then open the HTTPS URL from your phone.
+
+The deployment build generates the built-in easy and hard sample datasets, and
+the service uses Gunicorn with the port supplied by Render. Uploaded logs are
+processed in memory and are not saved by the app.
+
 ## Detection approach
 
 Munshi combines multiple rule-based strategies:
@@ -189,6 +204,7 @@ Important limitations:
 
 - Detection is rule-based and depends on configured thresholds and correlation assumptions.
 - Shared or reused IP addresses can contribute to false alarms.
+- Forgotten-password retry clusters remain an open false-alarm source. Munshi does not currently suppress them with same-log login history because a prior successful authentication from an address must not make later suspicious failures from that address invisible.
 - Unusual timing, log formats, or attack strategies may evade the rules.
 - A successful authentication near a cluster of failures does not automatically prove that the same actor caused both.
 - Distributed correlation does not establish compromise or attribute an attack to a particular person.

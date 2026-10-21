@@ -45,6 +45,36 @@ class TestNarrative(unittest.TestCase):
             next_line += 1
         return sorted(events, key=lambda event: (event.time, event.line_no))
 
+    def make_distributed_events(self):
+        base = datetime(2026, 10, 1, 9, 0, 0)
+        events = []
+
+        for source_index in range(20):
+            ip = f"203.0.113.{50 + source_index}"
+
+            for attempt in range(3):
+                line_no = len(events) + 1
+                when = base + timedelta(seconds=line_no - 1)
+                user = f"user{(source_index * 3 + attempt) % 28}"
+
+                events.append(Event(
+                    line_no=line_no,
+                    time=when,
+                    host="server01",
+                    user=user,
+                    ip=ip,
+                    port=22,
+                    success=False,
+                    invalid_user=False,
+                    raw=(
+                        f"{when.strftime('%b %d %H:%M:%S')} "
+                        f"server01 sshd[1]: Failed password for "
+                        f"{user} from {ip} port 22 ssh2"
+                    ),
+                ))
+
+        return sorted(events, key=lambda event: (event.time, event.line_no))
+
     def test_builds_verified_claims_from_real_finding_fields(self):
         events = self.make_events(successes=[(180, "root")])
         finding = detect(events, Config())[0]
@@ -151,34 +181,7 @@ class TestNarrative(unittest.TestCase):
         self.assertEqual(auth_claim["verification_method"], "complete_parsed_event_window_check")
 
     def test_distributed_campaign_narrative_is_verified_and_cautious(self):
-        base = datetime(2026, 10, 1, 9, 0, 0)
-        events = []
-
-        for source_index in range(20):
-            ip = f"203.0.113.{50 + source_index}"
-
-            for attempt in range(3):
-                line_no = len(events) + 1
-                when = base + timedelta(seconds=line_no - 1)
-                user = f"user{(source_index * 3 + attempt) % 54}"
-
-                events.append(Event(
-                    line_no=line_no,
-                    time=when,
-                    host="server01",
-                    user=user,
-                    ip=ip,
-                    port=22,
-                    success=False,
-                    invalid_user=False,
-                    raw=(
-                        f"{when.strftime('%b %d %H:%M:%S')} "
-                        f"server01 sshd[1]: Failed password for "
-                        f"{user} from {ip} port 22 ssh2"
-                    ),
-                ))
-
-        events.sort(key=lambda event: (event.time, event.line_no))
+        events = self.make_distributed_events()
         findings = detect(events, Config())
 
         distributed_findings = [
@@ -190,6 +193,11 @@ class TestNarrative(unittest.TestCase):
         self.assertEqual(len(distributed_findings), 1)
 
         finding = distributed_findings[0]
+        username_ratio = len(finding.users) / finding.failures
+        self.assertGreaterEqual(
+            username_ratio, Config().distributed_min_user_ratio
+        )
+        self.assertLess(username_ratio, Config().spray_user_ratio)
         narrative = build_narrative(finding, events)
 
         self.assertEqual(narrative["status"], "verified")
@@ -233,6 +241,41 @@ class TestNarrative(unittest.TestCase):
         self.assertIn(
             "attribution was not assessed",
             auth_claim["text"],
+        )
+
+    def test_forged_distributed_failure_count_is_rejected(self):
+        events = self.make_distributed_events()
+        finding = next(
+            item for item in detect(events, Config())
+            if len(item.source_ips) > 1
+        )
+
+        forged = replace(finding, failures=finding.failures + 1)
+        narrative = build_narrative(forged, events)
+
+        self.assertEqual(narrative["status"], "unavailable")
+        self.assertEqual(
+            narrative["verification"]["reason"],
+            "failure_count_does_not_match_evidence",
+        )
+
+    def test_forged_distributed_source_without_failures_is_rejected(self):
+        events = self.make_distributed_events()
+        finding = next(
+            item for item in detect(events, Config())
+            if len(item.source_ips) > 1
+        )
+
+        forged = replace(
+            finding,
+            source_ips=finding.source_ips + ["198.51.100.250"],
+        )
+        narrative = build_narrative(forged, events)
+
+        self.assertEqual(narrative["status"], "unavailable")
+        self.assertEqual(
+            narrative["verification"]["reason"],
+            "distributed_campaign_does_not_match_rule",
         )
 
 

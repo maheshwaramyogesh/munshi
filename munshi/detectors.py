@@ -34,6 +34,7 @@ class Config:
     episode_gap: timedelta = timedelta(minutes=15)  # a longer pause starts a new episode
     spray_min_users: int = 8                        # spray needs at least this many usernames...
     spray_user_ratio: float = 0.6                   # ...and distinct users / failures >= this
+    spray_max_failures_per_user: int = 3            # ...or only a few tries per username
     success_window: timedelta = timedelta(minutes=10)  # a login this soon after = "got in"
 
         # Correlate repeated short bursts without lowering min_failures.
@@ -101,6 +102,23 @@ def _split_episodes(failures: List[Event], gap: timedelta) -> List[List[Event]]:
     if current:
         episodes.append(current)
     return episodes
+
+def looks_like_single_ip_spray(
+    failures: List[Event],
+    users: List[str],
+    config: Config,
+) -> bool:
+    """Return True when one source IP shows a broad username spray."""
+    if len(users) < config.spray_min_users:
+        return False
+
+    if len(users) / len(failures) >= config.spray_user_ratio:
+        return True
+
+    failures_by_user = Counter(event.user for event in failures)
+    busiest_user_failures = max(failures_by_user.values(), default=0)
+
+    return busiest_user_failures <= config.spray_max_failures_per_user
 
 def _detect_threshold_dodgers(events: List[Event], config: Config):
     """Correlate repeated short failure bursts for the same IP and username."""
@@ -323,6 +341,11 @@ def _detect_distributed_sprays(events: List[Event], config: Config):
         (event for event in events if not event.success),
         key=lambda event: (event.time, event.line_no),
     )
+    successes_by_ip = defaultdict(list)
+
+    for event in events:
+        if event.success:
+            successes_by_ip[event.ip].append(event)
 
     candidates = []
 
@@ -343,6 +366,15 @@ def _detect_distributed_sprays(events: List[Event], config: Config):
             if config.distributed_min_failures_per_ip
             <= count
             <= config.distributed_max_failures_per_ip
+        }
+
+        participating_ips = {
+            ip
+            for ip in participating_ips
+            if not any(
+                first_event.time <= success.time <= window_end
+                for success in successes_by_ip.get(ip, [])
+            )
         }
 
         campaign_events = [
@@ -448,8 +480,11 @@ def detect(events: List[Event], config: Config = Config()) -> List[Finding]:
                 continue                                  # just noise
 
             users = sorted({e.user for e in ep})
-            looks_like_spray = (len(users) >= config.spray_min_users and
-                                len(users) / len(ep) >= config.spray_user_ratio)
+            looks_like_spray = looks_like_single_ip_spray(
+                ep,
+                users,
+                config,
+            )
             kind = "password_spray" if looks_like_spray else "brute_force"
 
             start, end = ep[0].time, ep[-1].time
@@ -497,12 +532,35 @@ def detect(events: List[Event], config: Config = Config()) -> List[Finding]:
 
     covered_lines = burst_lines | slow_lines | distributed_lines
 
-    # Replace basic findings that overlap advanced detections.
+    # Suppress a basic finding only when advanced detections cover most
+    # of its failed-authentication evidence. A handful of overlapping
+    # tail events must not erase a much larger brute-force episode.
+    failure_line_numbers = {
+        event.line_no for event in events if not event.success
+    }
+
     if covered_lines:
-        findings = [
-            finding for finding in findings
-            if not covered_lines.intersection(finding.evidence)
-        ]
+        retained_findings = []
+
+        for finding in findings:
+            failure_evidence = [
+                line for line in finding.evidence
+                if line in failure_line_numbers
+            ]
+            covered_failure_evidence = [
+                line for line in failure_evidence
+                if line in covered_lines
+            ]
+
+            overlap_ratio = (
+                len(covered_failure_evidence) / len(failure_evidence)
+                if failure_evidence else 0.0
+            )
+
+            if overlap_ratio < 0.70:
+                retained_findings.append(finding)
+
+        findings = retained_findings
 
     findings.extend(advanced_findings)
     findings.extend(slow_findings)
