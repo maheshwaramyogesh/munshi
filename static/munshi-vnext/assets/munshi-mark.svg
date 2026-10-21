@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" role="img" aria-label="Munshi mark">
+  <defs>
+    <linearGradient id="cover" x1="8" y1="6" x2="39" y2="43" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1D2D4A"/>
+      <stop offset="1" stop-color="#101A2E"/>
+    </linearGradient>
+    <linearGradient id="page" x1="12" y1="10" x2="35" y2="37" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F3F7FF"/>
+      <stop offset=".72" stop-color="#C9DDF3"/>
+      <stop offset="1" stop-color="#9ABDE0"/>
+    </linearGradient>
+  </defs>
+  <rect x="1.25" y="1.25" width="45.5" height="45.5" rx="12" fill="#0B1221" stroke="#273650" stroke-width="1.5"/>
+  <path d="M10 8.7c7.2-1.2 20.7-1.4 28.2.1l-.6 30.7c-7.2 1.2-20 1.2-27.1-.1L10 8.7Z" fill="url(#cover)" stroke="#506B91" stroke-width=".9"/>
+  <path d="M13 10.9c6.1-.7 15.2-.7 21.5.2l-.4 25.8c-5.7.7-14.8.7-21-.1l-.1-25.9Z" fill="url(#page)"/>
+  <path d="m13.1 11 10.8 8.1 10.6-7.9" stroke="#FFFFFF" stroke-opacity=".55" stroke-width=".8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M15.7 31.9V17.2l8.2 7.1 8.1-7.1v14.7" stroke="#17304F" stroke-width="2.65" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M15.7 32.8c5.8.7 11.8.7 16.3 0" stroke="#6E8FB5" stroke-opacity=".55" stroke-width=".7" stroke-linecap="round"/>
+  <path d="M34.6 36.8c-2.5.4-5.4.5-8 .5" stroke="#9666FF" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

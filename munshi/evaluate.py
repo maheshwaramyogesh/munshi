@@ -28,51 +28,159 @@ def _overlap(a_start, a_end, b_start, b_end) -> bool:
 
 def score(findings: List[Finding], truth: List[Dict],
           benign: Optional[List[Dict]] = None) -> Dict:
-    rows, matched_ids = [], set()
+    """Score findings against planted attacks using one-to-one matching."""
+    candidates_by_attack = []
+    attack_ips_list = []
+
+    # Build possible matches using time overlap and any shared source IP.
     for attack in truth:
         ips = attack.get("source_ips") or [attack["source_ip"]]
+        attack_ips = set(ips)
+        attack_ips_list.append(ips)
+
         t_start = datetime.fromisoformat(attack["start"])
         t_end = datetime.fromisoformat(attack["end"])
-        hits = [f for f in findings
-                if f.ip in ips and _overlap(f.start, f.end, t_start, t_end)]
-        matched_ids.update(id(f) for f in hits)
-        predicted = hits[0].label if hits else None
+
+        candidates = []
+
+        for finding_index, finding in enumerate(findings):
+            if not _overlap(
+                finding.start, finding.end, t_start, t_end
+            ):
+                continue
+
+            finding_ips = set(
+                getattr(finding, "source_ips", []) or [finding.ip]
+            )
+            shared_ips = len(attack_ips & finding_ips)
+
+            if shared_ips:
+                candidates.append((
+                    finding_index,
+                    shared_ips,
+                    finding.ip in attack_ips,
+                ))
+
+        # Prefer findings covering more planted IPs. The representative
+        # IP is only a tie-breaker, not the sole matching criterion.
+        candidates.sort(
+            key=lambda item: (item[1], item[2]),
+            reverse=True,
+        )
+        candidates_by_attack.append(
+            [item[0] for item in candidates]
+        )
+
+    # Assign each finding to at most one planted attack.
+    finding_to_attack = {}
+
+    def assign(attack_index, seen_findings):
+        for finding_index in candidates_by_attack[attack_index]:
+            if finding_index in seen_findings:
+                continue
+
+            seen_findings.add(finding_index)
+            previous_attack = finding_to_attack.get(finding_index)
+
+            if (
+                previous_attack is None
+                or assign(previous_attack, seen_findings)
+            ):
+                finding_to_attack[finding_index] = attack_index
+                return True
+
+        return False
+
+    # Give attacks with fewer possible matches priority. Prefer matching
+    # campaigns with more source IPs first when candidate counts tie.
+    attack_order = sorted(
+        range(len(truth)),
+        key=lambda i: (
+            len(candidates_by_attack[i]),
+            -len(set(attack_ips_list[i])),
+        ),
+    )
+
+    for attack_index in attack_order:
+        assign(attack_index, set())
+
+    attack_to_finding = {
+        attack_index: finding_index
+        for finding_index, attack_index in finding_to_attack.items()
+    }
+
+    rows = []
+
+    for attack_index, attack in enumerate(truth):
+        ips = attack_ips_list[attack_index]
+        finding_index = attack_to_finding.get(attack_index)
+        finding = (
+            findings[finding_index]
+            if finding_index is not None
+            else None
+        )
+
+        predicted = finding.label if finding is not None else None
+        found = finding is not None
+
         rows.append({
-            "id": attack["id"], "ip": ips[0], "n_ips": len(ips),
+            "id": attack["id"],
+            "ip": ips[0],
+            "n_ips": len(ips),
             "variant": attack.get("variant", "loud"),
-            "planted": attack["type"], "found": bool(hits), "predicted": predicted,
-            "correct_type": predicted == attack["type"],
+            "planted": attack["type"],
+            "found": found,
+            "predicted": predicted,
+            "correct_type": found and predicted == attack["type"],
         })
 
-    false_alarms = [f for f in findings if id(f) not in matched_ids]
+    matched_indices = set(finding_to_attack)
+    false_alarms = [
+        finding
+        for index, finding in enumerate(findings)
+        if index not in matched_indices
+    ]
+
     causes = Counter()
-    for f in false_alarms:
+
+    for finding in false_alarms:
+        finding_ips = set(
+            getattr(finding, "source_ips", []) or [finding.ip]
+        )
         cause = "unexplained"
+
         for case in benign or []:
-            if f.ip in case["ips"] and _overlap(f.start, f.end,
-                                                datetime.fromisoformat(case["start"]),
-                                                datetime.fromisoformat(case["end"])):
+            case_start = datetime.fromisoformat(case["start"])
+            case_end = datetime.fromisoformat(case["end"])
+
+            if (
+                finding_ips.intersection(case["ips"])
+                and _overlap(
+                    finding.start, finding.end, case_start, case_end
+                )
+            ):
                 cause = case["type"]
                 break
+
         causes[cause] += 1
 
-    by_variant = defaultdict(lambda: [0, 0, 0])      # [planted, detected, correct_type]
-    for r in rows:
-        v = by_variant[r["variant"]]
-        v[0] += 1
-        v[1] += r["found"]
-        v[2] += r["correct_type"]
+    by_variant = defaultdict(lambda: [0, 0, 0])
+
+    for row in rows:
+        variant = by_variant[row["variant"]]
+        variant[0] += 1
+        variant[1] += row["found"]
+        variant[2] += row["correct_type"]
 
     return {
         "rows": rows,
         "planted": len(truth),
-        "detected": sum(r["found"] for r in rows),
-        "correct_type": sum(r["correct_type"] for r in rows),
+        "detected": sum(row["found"] for row in rows),
+        "correct_type": sum(row["correct_type"] for row in rows),
         "false_alarms": false_alarms,
         "false_alarm_causes": dict(causes),
         "by_variant": dict(by_variant),
     }
-
 
 def print_report(r: Dict) -> None:
     print(f"{'id':>2}  {'variant':<17} {'IPs':>3}  {'planted':<20} {'predicted':<20} ok")
